@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${1:-${PERSONA_PTY_HARNESS_ROOT:-}}"
+if [[ -z "$root" && -s /tmp/persona-pty-harnesses-current ]]; then
+  root="$(cat /tmp/persona-pty-harnesses-current)"
+fi
+if [[ -z "$root" ]]; then
+  echo "missing PTY harness root; pass one or run setup-pty-harnesses first" >&2
+  exit 2
+fi
+
+source "$root/session.env"
+kill "$PERSONA_OPERATOR_DAEMON_PID" "$PERSONA_DESIGNER_DAEMON_PID" 2>/dev/null || true
+echo "tore down PTY harnesses: $root"

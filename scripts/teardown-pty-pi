@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${1:-${PERSONA_PTY_PI_ROOT:-}}"
+if [[ -z "$root" && -s /tmp/persona-pty-pi-current ]]; then
+  root="$(cat /tmp/persona-pty-pi-current)"
+fi
+if [[ -z "$root" ]]; then
+  echo "missing Pi PTY root; pass one or run setup-pty-pi first" >&2
+  exit 2
+fi
+
+source "$root/session.env"
+for pid in "${PERSONA_PI_DAEMON_PID:-}" "${PERSONA_PI_PID:-}"; do
+  if [[ -n "$pid" ]]; then
+    kill "$pid" 2>/dev/null || true
+  fi
+done
+echo "tore down $root"

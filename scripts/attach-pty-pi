@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${1:-${PERSONA_PTY_PI_ROOT:-}}"
+if [[ -z "$root" && -s /tmp/persona-pty-pi-current ]]; then
+  root="$(cat /tmp/persona-pty-pi-current)"
+fi
+if [[ -z "$root" ]]; then
+  echo "missing Pi PTY root; pass one or run setup-pty-pi first" >&2
+  exit 2
+fi
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+source "$root/session.env"
+terminal_repo="${PERSONA_WEZTERM_REPO:-$(cd "$repo/../persona-wezterm" && pwd)}"
+terminal_target="$terminal_repo/target/debug"
+cargo build --manifest-path "$terminal_repo/Cargo.toml" --bin persona-wezterm-view >/dev/null
+
+setsid wezterm start \
+  --always-new-process \
+  --class persona-pty-pi \
+  --workspace persona-pty-pi \
+  --cwd "$root" \
+  -- env PERSONA_WEZTERM_HANDSHAKE="${PERSONA_WEZTERM_HANDSHAKE:-}" PERSONA_WEZTERM_VIEW_TITLE=PERSONA-PI "$terminal_target/persona-wezterm-view" "$PERSONA_PI_SOCKET" >"$root/pi.attach.log" 2>&1 &
+viewer_pid="$!"
+
+echo "root=$root"
+echo "viewer_pid=$viewer_pid"

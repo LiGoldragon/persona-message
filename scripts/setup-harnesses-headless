@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+
+exec bash ./scripts/setup-harnesses headless

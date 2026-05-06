@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
+terminal_repo="${PERSONA_WEZTERM_REPO:-$(cd "$repo/../persona-wezterm" && pwd)}"
+terminal_target="$terminal_repo/target/debug"
+
+socket="${1:?usage: pty-send <socket> <text>}"
+text="${2-}"
+
+if [[ ! -x "$terminal_target/persona-wezterm-send" ]]; then
+  cargo build --manifest-path "$terminal_repo/Cargo.toml" --bin persona-wezterm-send >/dev/null
+fi
+
+exec "$terminal_target/persona-wezterm-send" "$socket" "$text"

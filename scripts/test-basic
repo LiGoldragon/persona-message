@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+
+cargo fmt --all
+cargo test
+nix flake check

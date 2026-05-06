@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+
+export PERSONA_RUN_ACTUAL_HARNESSES=1
+cargo test --test actual_harness actual_codex_initiates_claude_receives_idle_message -- --ignored --nocapture

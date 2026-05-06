@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+
+tmp="$(mktemp -d)"
+pane="$(
+  wezterm cli --prefer-mux spawn \
+    --new-window \
+    --workspace persona-message-debug \
+    --cwd "$tmp" \
+    -- sh -lc 'script -q -f -O claude.typescript -- claude --model "${PERSONA_CLAUDE_MODEL:-claude-haiku-4-5}" --effort low --dangerously-skip-permissions "Reply exactly READY-DESIGNER."'
+)"
+
+echo "pane=$pane"
+echo "dir=$tmp"
+sleep "${PERSONA_DEBUG_CAPTURE_DELAY:-15}"
+echo "--- wezterm get-text ---"
+wezterm cli --prefer-mux get-text --pane-id "$pane" || true
+echo "--- transcript ---"
+cat "$tmp/claude.typescript" || true
+wezterm cli --prefer-mux kill-pane --pane-id "$pane" >/dev/null 2>&1 || true

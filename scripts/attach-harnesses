@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="${PERSONA_MESSAGE_SCRIPT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
+# shellcheck source=scripts/harness-common
+source "$script_dir/harness-common"
+
+root="$(harness_root "${1:-}")"
+load_harness "$root"
+
+require_alive operator "$PERSONA_MESSAGE_OPERATOR_PID"
+require_alive designer "$PERSONA_MESSAGE_DESIGNER_PID"
+
+echo "attaching to $PERSONA_MESSAGE_WEZTERM_WORKSPACE"
+echo "operator pane: $PERSONA_MESSAGE_OPERATOR_PANE"
+echo "designer pane: $PERSONA_MESSAGE_DESIGNER_PANE"
+exec wezterm connect local --workspace "$PERSONA_MESSAGE_WEZTERM_WORKSPACE"

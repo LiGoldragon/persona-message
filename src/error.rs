@@ -1,0 +1,58 @@
+use std::path::PathBuf;
+
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("nota: {0}")]
+    Nota(#[from] nota_codec::Error),
+
+    #[error("terminal: {0}")]
+    Terminal(#[from] persona_wezterm::Error),
+
+    #[error("inline Nota argument must be UTF-8: {got:?}")]
+    InvalidInlineNotaArgument { got: String },
+
+    #[error("missing NOTA input; pass one record such as '(Send designer \"hello\")'")]
+    MissingInput,
+
+    #[error("unexpected command-line argument: {got:?}")]
+    UnexpectedArgument { got: String },
+
+    #[error("message store line {line} is invalid in {path:?}")]
+    InvalidStoreLine {
+        path: PathBuf,
+        line: usize,
+        source: nota_codec::Error,
+    },
+
+    #[error("actor index line {line} is invalid in {path:?}")]
+    InvalidActorLine {
+        path: PathBuf,
+        line: usize,
+        source: nota_codec::Error,
+    },
+
+    #[error("no actor in {path:?} matches this process ancestry")]
+    NoMatchingAgent { path: PathBuf },
+
+    #[error("process {pid} has no PPid field in /proc/{pid}/status")]
+    MissingParentProcess { pid: u32 },
+
+    #[error("process id {got:?} is invalid")]
+    InvalidProcessId { got: String },
+
+    #[error("wezterm pane id {got:?} is invalid")]
+    InvalidPaneId { got: String },
+
+    #[error("daemon socket is not configured")]
+    MissingDaemonSocket,
+
+    #[error("daemon response was invalid: {got}")]
+    InvalidDaemonResponse { got: String },
+}
+
+pub type Result<T> = std::result::Result<T, Error>;

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${1:-${PERSONA_PTY_ROOT:-}}"
+if [[ -z "$root" && -s /tmp/persona-pty-current ]]; then
+  root="$(cat /tmp/persona-pty-current)"
+fi
+if [[ -z "$root" ]]; then
+  echo "missing PTY demo root; pass one or run setup-pty-demo first" >&2
+  exit 2
+fi
+
+source "$root/session.env"
+if ! ps -p "$PERSONA_PTY_DAEMON_PID" >/dev/null 2>&1; then
+  echo "PTY daemon is not alive: $PERSONA_PTY_DAEMON_PID" >&2
+  exit 1
+fi
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+terminal_repo="${PERSONA_WEZTERM_REPO:-$(cd "$repo/../persona-wezterm" && pwd)}"
+terminal_target="$terminal_repo/target/debug"
+cargo build --manifest-path "$terminal_repo/Cargo.toml" --bin persona-wezterm-view >/dev/null
+
+exec wezterm start \
+  --always-new-process \
+  --class persona-pty-demo \
+  --workspace persona-pty-demo \
+  --cwd "$root" \
+  -- env PERSONA_WEZTERM_HANDSHAKE="${PERSONA_WEZTERM_HANDSHAKE:-}" "$terminal_target/persona-wezterm-view" "$PERSONA_PTY_SOCKET"

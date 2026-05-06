@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+
+test_name="${1:-}"
+if [[ -z "$test_name" ]]; then
+  echo "usage: test-actual-harness <cargo-test-name>" >&2
+  echo "examples:" >&2
+  echo "  test-actual-harness actual_codex_initiates_claude_receives_idle_message" >&2
+  echo "  test-actual-harness actual_claude_initiates_codex_receives_idle_message" >&2
+  exit 2
+fi
+
+export PERSONA_RUN_ACTUAL_HARNESSES=1
+cargo test --test actual_harness "$test_name" -- --ignored --nocapture

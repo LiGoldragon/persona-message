@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+terminal_repo="${PERSONA_WEZTERM_REPO:-$(cd "$repo/../persona-wezterm" && pwd)}"
+terminal_target="$terminal_repo/target/debug"
+
+root="${PERSONA_PTY_PI_ROOT:-$(mktemp -d -t persona-pty-pi.XXXXXXXX)}"
+store="$root/store"
+workspace="$root/workspace"
+socket="$root/pi.sock"
+mkdir -p "$store" "$workspace"
+
+cargo build --bin message
+cargo build --manifest-path "$terminal_repo/Cargo.toml" --bins
+
+pi_bin="${PERSONA_PI_BIN:-$(command -v pi)}"
+pi_model="${PERSONA_PI_MODEL:-prometheus/glm-4.7-flash}"
+runner_path="$repo/target/debug:$terminal_target:$PATH"
+
+runner="$root/run-pi.sh"
+cat > "$runner" <<EOF
+#!/bin/sh
+set -eu
+cd '$workspace'
+printf '%s\n' \$\$ > '$root/pi.pid'
+export PERSONA_MESSAGE_STORE='$store'
+export PATH='$runner_path'
+unset NO_COLOR
+export TERM=xterm-256color
+export COLORTERM=truecolor
+export CLICOLOR=1
+export FORCE_COLOR=1
+command -v '$pi_bin' >/dev/null
+exec '$pi_bin' --offline --model '$pi_model' --thinking off --no-tools
+EOF
+chmod +x "$runner"
+
+setsid "$terminal_target/persona-wezterm-daemon" "$socket" "$runner" >"$root/pi.ptyd.log" 2>&1 &
+daemon_pid="$!"
+for _ in $(seq 1 100); do
+  [[ -S "$socket" ]] && break
+  sleep 0.1
+done
+if [[ ! -S "$socket" ]]; then
+  echo "Pi PTY daemon did not create socket: $socket" >&2
+  sed -n '1,120p' "$root/pi.ptyd.log" >&2 || true
+  exit 1
+fi
+printf '%s\n' "$daemon_pid" > "$root/pi.daemon.pid"
+
+for _ in $(seq 1 200); do
+  [[ -s "$root/pi.pid" ]] && break
+  sleep 0.1
+done
+if [[ ! -s "$root/pi.pid" ]]; then
+  echo "missing Pi harness pid file: $root/pi.pid" >&2
+  exit 1
+fi
+pi_pid="$(cat "$root/pi.pid")"
+
+cat > "$store/actors.nota" <<EOF
+(Actor pi $pi_pid (EndpointTransport pty-socket "$socket" None))
+EOF
+
+cat > "$root/session.env" <<EOF
+PERSONA_PTY_PI_ROOT=$root
+PERSONA_MESSAGE_STORE=$store
+PERSONA_PI_SOCKET=$socket
+PERSONA_PI_DAEMON_PID=$daemon_pid
+PERSONA_PI_PID=$pi_pid
+PERSONA_WEZTERM_HANDSHAKE=1
+EOF
+printf '%s\n' "$root" > /tmp/persona-pty-pi-current
+
+setsid wezterm start \
+  --always-new-process \
+  --class persona-pty-pi \
+  --workspace persona-pty-pi \
+  --cwd "$root" \
+  -- env PERSONA_WEZTERM_HANDSHAKE=1 PERSONA_WEZTERM_VIEW_TITLE=PERSONA-PI "$terminal_target/persona-wezterm-view" "$socket" >"$root/pi.view.log" 2>&1 &
+viewer_pid="$!"
+
+echo "root=$root"
+echo "store=$store"
+echo "socket=$socket"
+echo "pi_pid=$pi_pid"
+echo "daemon_pid=$daemon_pid"
+echo "viewer_pid=$viewer_pid"
+echo "model=$pi_model"
+
+sleep 3
+"$terminal_target/persona-wezterm-send" "$socket" \
+  "You are a Persona Pi harness running in a scrollback test. Print exactly 80 numbered lines in the form PI SCROLLBACK LINE 001 through PI SCROLLBACK LINE 080, then print PI READY and wait idle."

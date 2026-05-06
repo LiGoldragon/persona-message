@@ -1,0 +1,32 @@
+[package]
+name         = "persona-message"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.85"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/LiGoldragon/persona-message"
+description  = "Typed NOTA message contract and shim for Persona harnesses."
+
+[lib]
+name = "persona_message"
+path = "src/lib.rs"
+
+[[bin]]
+name = "message"
+path = "src/main.rs"
+
+[[bin]]
+name = "message-daemon"
+path = "src/bin/message-daemon.rs"
+
+[dependencies]
+nota-codec      = { path = "../nota-codec" }
+persona-wezterm = { path = "../persona-wezterm" }
+thiserror       = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unused = "warn"
+dead_code = "warn"

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${PERSONA_PTY_PI_MESSAGE_ROOT:-}"
+if [[ -z "$root" && -s /tmp/persona-pty-pi-message-current ]]; then
+  root="$(cat /tmp/persona-pty-pi-message-current)"
+fi
+if [[ -z "$root" || ! -d "$root" ]]; then
+  echo "no Persona Pi message session root found"
+  exit 0
+fi
+
+for file in "$root"/*.viewer.pid "$root"/*.daemon.pid "$root"/*.pid; do
+  [[ -f "$file" ]] || continue
+  pid="$(cat "$file" 2>/dev/null || true)"
+  [[ "$pid" =~ ^[0-9]+$ ]] || continue
+  kill "$pid" 2>/dev/null || true
+done
+
+sleep 1
+for file in "$root"/*.viewer.pid "$root"/*.daemon.pid "$root"/*.pid; do
+  [[ -f "$file" ]] || continue
+  pid="$(cat "$file" 2>/dev/null || true)"
+  [[ "$pid" =~ ^[0-9]+$ ]] || continue
+  kill -9 "$pid" 2>/dev/null || true
+done
+
+rm -f /tmp/persona-pty-pi-message-current
+echo "torn_down=$root"
