@@ -1,30 +1,94 @@
-# Architecture
+# persona-message — architecture
 
-Persona Message is a CLI and text-boundary repository. It does not own
-Persona's reducer, harness lifecycle, authorization policy, durable state
-engine, or binary wire contract. `persona-signal` owns the shared rkyv contract.
+*Human and harness NOTA boundary for Persona messages.*
+
+`persona-message` owns the `message` CLI and the transitional message ledger
+used while the router and store are being assembled. It validates NOTA input
+from a human or harness, resolves sender identity from the running process, and
+projects typed message records back to NOTA.
+
+---
+
+## 0 · TL;DR
+
+This repo is the text boundary, not the shared binary contract. Component-to-
+component traffic uses `persona-signal`; durable assembled state belongs behind
+`persona-store`.
 
 ```mermaid
 flowchart LR
-    "operator harness" -->|"Send NOTA"| "message CLI"
-    "actors.nota" -->|"process ancestry match"| "message CLI"
-    "message CLI" -->|"typed request"| "persona-signal"
-    "persona-signal" -->|"commit request"| "persona-store"
-    "persona-router" -->|"pre-harness NOTA projection"| "designer harness"
+    "human or harness" -->|"NOTA Send"| "message CLI"
+    "actors.nota" -->|"process ancestry"| "message CLI"
+    "message CLI" -->|"typed validation"| "local message ledger"
+    "message CLI" -->|"Frame request"| "persona-signal"
+    "persona-router" -->|"pre-harness NOTA projection"| "message CLI"
 ```
 
-The prototype store is an append-only NOTA-line ledger plus a small agent config
-file. It exists so harnesses can communicate immediately while the Persona
-store and router are still being built. The current record shapes are useful
-test fixtures, not the permanent inter-component contract:
+## 1 · Component Surface
 
-- `Message` is the durable unit of communication.
-- `Agent` maps a harness name to a process ID for sender resolution.
-- `Send` is the caller-facing input; the binary stamps the trusted sender.
-- `Inbox` reads the current recipient view.
-- `Tail` blocks and prints newly appended messages for the resolved recipient.
+`persona-message` exposes:
 
-The later Persona path replaces the file ledger with `persona-store` and
-routes delivery through `persona-router`. BEADS should not become a
-compatibility surface for this crate; BEADS is transitional coordination
-substrate.
+- `message` CLI for NOTA input/output;
+- `message-daemon` as the transitional daemon surface;
+- local actor resolution from process ancestry;
+- local append/read surfaces for message tests;
+- stateful harness scripts exposed through Nix apps.
+
+## 2 · State and Ownership
+
+The current local ledger is development state. It keeps harness-to-harness tests
+usable before `persona-router` and `persona-store` fully own delivery and
+durable commits.
+
+In the assembled runtime:
+
+- `persona-message` remains the NOTA CLI/projection layer;
+- `persona-router` owns routing and pending delivery;
+- `persona-store` owns durable transition ordering;
+- `persona-signal` owns the Rust wire records.
+
+## 3 · Boundaries
+
+This repo owns:
+
+- NOTA `Send`, `Inbox`, and `Tail` CLI surfaces;
+- sender resolution from process ancestry;
+- human/harness message projection;
+- stateful real-harness test scripts.
+
+This repo does not own:
+
+- shared rkyv frame types;
+- final routing policy;
+- final durable database;
+- OS/window-manager focus observations;
+- terminal byte transport.
+
+## 4 · Invariants
+
+- Sender identity is trusted from process ancestry, not model text.
+- NOTA input is decoded into typed Rust before it affects state.
+- Harness tests target interactive persistent harnesses, not non-interactive
+  provider commands.
+- Repeated debug commands become named scripts and Nix apps.
+- BEADS remains outside the Persona API.
+
+## Code Map
+
+```text
+src/main.rs            message CLI entry
+src/bin/message-daemon.rs
+src/schema.rs          NOTA-facing records
+src/resolver.rs        process ancestry sender resolution
+src/store.rs           transitional local ledger
+src/daemon.rs          transitional daemon surface
+scripts/               repeatable stateful harness workflows
+tests/                 CLI, daemon, two-process, and harness tests
+```
+
+## See Also
+
+- `../persona-signal/ARCHITECTURE.md`
+- `../persona-router/ARCHITECTURE.md`
+- `../persona-store/ARCHITECTURE.md`
+- `../persona-wezterm/ARCHITECTURE.md`
