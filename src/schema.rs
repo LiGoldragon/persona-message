@@ -24,11 +24,57 @@ impl MessageId {
         hash.feed_str(from.as_str());
         hash.feed_str(to.as_str());
         hash.feed_str(body);
-        Self(format!("m-{}", hash.finish_base32()))
+        Self(format!(
+            "{}{}",
+            MessageIdKind::Message.prefix(),
+            hash.finish_base32_3()
+        ))
     }
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    pub fn view(&self) -> Option<MessageIdView<'_>> {
+        MessageIdKind::ALL
+            .iter()
+            .find_map(|kind| MessageIdView::from_id(*kind, self.0.as_str()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageIdKind {
+    Message,
+}
+
+impl MessageIdKind {
+    const ALL: &'static [Self] = &[Self::Message];
+
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::Message => "m-",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageIdView<'id> {
+    kind: MessageIdKind,
+    short_hash: &'id str,
+}
+
+impl<'id> MessageIdView<'id> {
+    fn from_id(kind: MessageIdKind, id: &'id str) -> Option<Self> {
+        let short_hash = id.strip_prefix(kind.prefix())?;
+        ShortMessageHash::is_valid_base32_3(short_hash).then_some(Self { kind, short_hash })
+    }
+
+    pub fn kind(&self) -> MessageIdKind {
+        self.kind
+    }
+
+    pub fn short_hash(&self) -> &str {
+        self.short_hash
     }
 }
 
@@ -64,14 +110,18 @@ impl ShortMessageHash {
         }
     }
 
-    fn finish_base32(self) -> String {
+    fn finish_base32_3(self) -> String {
         let mut value = self.value;
-        let mut text = String::with_capacity(7);
-        for _ in 0..7 {
+        let mut text = String::with_capacity(3);
+        for _ in 0..3 {
             text.push(Self::ALPHABET[(value & 31) as usize] as char);
             value >>= 5;
         }
         text
+    }
+
+    fn is_valid_base32_3(text: &str) -> bool {
+        text.len() == 3 && text.bytes().all(|byte| Self::ALPHABET.contains(&byte))
     }
 }
 

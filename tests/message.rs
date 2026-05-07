@@ -1,6 +1,8 @@
 use persona_message::command::{CommandLine, Input};
 use persona_message::resolver::{ActorIndex, ProcessAncestry};
-use persona_message::schema::{Actor, ActorId, EndpointKind, EndpointTransport, Message};
+use persona_message::schema::{
+    Actor, ActorId, EndpointKind, EndpointTransport, Message, MessageIdKind,
+};
 use persona_message::store::{MessageStore, StorePath};
 
 #[test]
@@ -122,8 +124,9 @@ fn command_line_send_stamps_resolved_sender() {
     let messages = store.messages().expect("messages read");
 
     assert_eq!(messages.len(), 1);
-    assert!(messages[0].id.as_str().starts_with("m-"));
-    assert_eq!(messages[0].id.as_str().len(), 9);
+    let id = messages[0].id.view().expect("message id has typed view");
+    assert_eq!(id.kind(), MessageIdKind::Message);
+    assert_eq!(id.short_hash().len(), 3);
     assert_eq!(messages[0].from.as_str(), "operator");
     assert_eq!(messages[0].to.as_str(), "designer");
     assert!(
