@@ -1,13 +1,14 @@
 # Skill — persona-message
 
-*How to work on Persona's first typed message contract.*
+*How to work on Persona's NOTA message CLI and prototype ledger.*
 
 ---
 
 ## What this repo owns
 
 `persona-message` owns the small NOTA message-plane prototype for Persona. The
-important contract is:
+shared binary contract belongs to `persona-signal`; this repository owns the
+human/harness text boundary:
 
 - `Actor` maps a harness actor name to a process ID in `actors.nota`.
   Actors may own an endpoint such as a PTY socket or WezTerm pane.

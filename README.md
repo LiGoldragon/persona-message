@@ -1,8 +1,12 @@
 # Persona Message
 
-`persona-message` is the first typed message contract for Persona. The `message`
-binary accepts one NOTA input record, decodes it through Rust types, and stores
-canonical `Message` records in a local prototype ledger.
+`persona-message` is Persona's human-facing message CLI and prototype ledger.
+The `message` binary accepts one NOTA input record, decodes it through Rust
+types, and stores canonical `Message` records in a local prototype ledger.
+
+The shared binary contract now belongs to `persona-signal`. This repository
+remains useful as the text boundary for harnesses and humans: NOTA in, typed
+validation, NOTA projection out.
 
 The first harness-to-harness path is deliberately small. The test setup writes
 an `actors.nota` file that maps harness names to parent process IDs:
@@ -22,5 +26,6 @@ PERSONA_MESSAGE_STORE=.message message '(Tail)'
 ```
 
 BEADS remains useful for today's workspace coordination, but it is not part of
-the destination API. Persona coordination is expected to become typed NOTA
-records flowing through one reducer.
+the destination API. Persona coordination is expected to become typed frames
+flowing through `persona-signal`, `persona-store`, and `persona-router`, with
+NOTA kept at the human and harness projection boundaries.

@@ -1,21 +1,22 @@
 # Architecture
 
-Persona Message is a contract repository. It does not own Persona's reducer,
-harness lifecycle, authorization policy, or durable state engine. It owns the
-message-plane records that those components agree on.
+Persona Message is a CLI and text-boundary repository. It does not own
+Persona's reducer, harness lifecycle, authorization policy, durable state
+engine, or binary wire contract. `persona-signal` owns the shared rkyv contract.
 
 ```mermaid
 flowchart LR
-    sender[operator harness] -->|Send NOTA| shim[message shim]
-    actors[(actors.nota)] -->|process ancestry match| shim
-    shim -->|stamp sender + canonicalize| store[(messages.nota.log)]
-    receiver[designer harness] -->|Inbox or Tail NOTA| shim
-    shim -->|recipient filter| receiver
+    "operator harness" -->|"Send NOTA"| "message CLI"
+    "actors.nota" -->|"process ancestry match"| "message CLI"
+    "message CLI" -->|"typed request"| "persona-signal"
+    "persona-signal" -->|"commit request"| "persona-store"
+    "persona-router" -->|"pre-harness NOTA projection"| "designer harness"
 ```
 
 The prototype store is an append-only NOTA-line ledger plus a small agent config
 file. It exists so harnesses can communicate immediately while the Persona
-reducer is still being designed. The record shapes are the important artifact:
+store and router are still being built. The current record shapes are useful
+test fixtures, not the permanent inter-component contract:
 
 - `Message` is the durable unit of communication.
 - `Agent` maps a harness name to a process ID for sender resolution.
@@ -23,6 +24,7 @@ reducer is still being designed. The record shapes are the important artifact:
 - `Inbox` reads the current recipient view.
 - `Tail` blocks and prints newly appended messages for the resolved recipient.
 
-The later Persona daemon should replace the file ledger with the canonical
-single reducer and transition log. BEADS should not become a compatibility
-surface for this crate; BEADS is transitional coordination substrate.
+The later Persona path replaces the file ledger with `persona-store` and
+routes delivery through `persona-router`. BEADS should not become a
+compatibility surface for this crate; BEADS is transitional coordination
+substrate.
