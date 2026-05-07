@@ -16,9 +16,10 @@ Use bash only for short `message ...` commands.
 
 ## Status To Operator
 
-The actor `operator` is the supervising test/operator harness. When a test asks
+The actor `operator` is a supervising human/operator actor. When a test asks
 you to report readiness or completion to the operator, send a normal Persona
-message:
+message. The message daemon stores it in the operator inbox; it is not terminal
+input for the operator harness.
 
 ```sh
 message '(Send operator "status text")'

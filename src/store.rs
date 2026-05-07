@@ -176,6 +176,7 @@ impl Actor {
             return Ok(false);
         };
         match endpoint.kind.as_str() {
+            "human" => Ok(false),
             "pty-socket" => {
                 PtySocket::from_path(&endpoint.target).send_prompt(prompt.as_str())?;
                 Ok(true)

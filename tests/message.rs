@@ -79,6 +79,26 @@ fn actor_endpoint_round_trips_with_owned_endpoint() {
 }
 
 #[test]
+fn human_endpoint_does_not_inject_terminal_input() {
+    let actor = Actor {
+        name: ActorId::new("operator"),
+        pid: std::process::id(),
+        endpoint: Some(EndpointTransport {
+            kind: EndpointKind::new("human"),
+            target: "operator".to_string(),
+            aux: None,
+        }),
+    };
+    let prompt = persona_wezterm::terminal::TerminalPrompt::from_text(
+        "(Message m-abc direct-designer-operator designer operator ready [])",
+    );
+
+    let delivered = actor.deliver(&prompt).expect("human endpoint is accepted");
+
+    assert!(!delivered);
+}
+
+#[test]
 fn store_filters_messages_by_recipient() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let store = MessageStore::from_path(StorePath::from_path(directory.path()));

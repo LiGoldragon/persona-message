@@ -159,13 +159,7 @@ pid_a="$(cat "$root/initiator.pid")"
 pid_b="$(cat "$root/responder.pid")"
 operator_pane="${PERSONA_OPERATOR_PANE_ID:-${WEZTERM_PANE:-None}}"
 operator_socket="${WEZTERM_UNIX_SOCKET:-None}"
-if [[ "$operator_pane" =~ ^[0-9]+$ && "$operator_socket" != None ]]; then
-  operator_endpoint="(EndpointTransport wezterm-pane \"$operator_pane\" \"$operator_socket\")"
-elif [[ "$operator_pane" =~ ^[0-9]+$ ]]; then
-  operator_endpoint="(EndpointTransport wezterm-pane \"$operator_pane\" None)"
-else
-  operator_endpoint="None"
-fi
+operator_endpoint="(EndpointTransport human operator None)"
 cat > "$store/actors.nota" <<EOF
 (Actor operator $$ $operator_endpoint)
 (Actor initiator $pid_a (EndpointTransport pty-socket "$socket_a" None))
