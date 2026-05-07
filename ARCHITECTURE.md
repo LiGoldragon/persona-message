@@ -12,7 +12,7 @@ projects typed message records back to NOTA.
 ## 0 · TL;DR
 
 This repo is the text boundary, not the shared binary contract. Component-to-
-component traffic uses `persona-signal`; durable assembled state belongs behind
+component traffic uses `signal-persona`; durable assembled state belongs behind
 `persona-store`.
 
 ```mermaid
@@ -20,7 +20,7 @@ flowchart LR
     "human or harness" -->|"NOTA Send"| "message CLI"
     "actors.nota" -->|"process ancestry"| "message CLI"
     "message CLI" -->|"typed validation"| "local message ledger"
-    "message CLI" -->|"Frame request"| "persona-signal"
+    "message CLI" -->|"Frame request"| "signal-persona"
     "persona-router" -->|"pre-harness NOTA projection"| "message CLI"
 ```
 
@@ -45,7 +45,7 @@ In the assembled runtime:
 - `persona-message` remains the NOTA CLI/projection layer;
 - `persona-router` owns routing and pending delivery;
 - `persona-store` owns durable transition ordering;
-- `persona-signal` owns the Rust wire records.
+- `signal-persona` owns the Rust wire records.
 
 ## 3 · Boundaries
 
@@ -88,7 +88,7 @@ tests/                 CLI, daemon, two-process, and harness tests
 
 ## See Also
 
-- `../persona-signal/ARCHITECTURE.md`
+- `../signal-persona/ARCHITECTURE.md`
 - `../persona-router/ARCHITECTURE.md`
 - `../persona-store/ARCHITECTURE.md`
 - `../persona-wezterm/ARCHITECTURE.md`

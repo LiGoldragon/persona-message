@@ -4,7 +4,7 @@
 The `message` binary accepts one NOTA input record, decodes it through Rust
 types, and stores canonical `Message` records in a local development ledger.
 
-The shared binary contract now belongs to `persona-signal`. This repository
+The shared binary contract now belongs to `signal-persona`. This repository
 remains useful as the text boundary for harnesses and humans: NOTA in, typed
 validation, NOTA projection out.
 
@@ -27,6 +27,6 @@ PERSONA_MESSAGE_STORE=.message message '(Tail)'
 
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through typed frames in
-`persona-signal`, durable commits in `persona-store`, and delivery policy in
+`signal-persona`, durable commits in `persona-store`, and delivery policy in
 `persona-router`, with NOTA kept at the human and harness projection
 boundaries.
