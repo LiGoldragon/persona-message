@@ -1,7 +1,6 @@
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
@@ -88,17 +87,20 @@ impl Input {
 
 impl Send {
     pub fn into_message(self, sender: ActorId, sequence: u64) -> Message {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
         let thread = ThreadId::new(format!(
             "direct-{}-{}",
             sender.as_str(),
             self.recipient.as_str()
         ));
+        let id = MessageId::from_parts(
+            sequence,
+            &thread,
+            &sender,
+            &self.recipient,
+            self.body.as_str(),
+        );
         Message {
-            id: MessageId::new(format!("m-{timestamp}-{sequence}")),
+            id,
             thread,
             from: sender,
             to: self.recipient,

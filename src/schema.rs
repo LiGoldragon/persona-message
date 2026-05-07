@@ -11,8 +11,67 @@ impl MessageId {
         Self(text.into())
     }
 
+    pub fn from_parts(
+        sequence: u64,
+        thread: &ThreadId,
+        from: &ActorId,
+        to: &ActorId,
+        body: &str,
+    ) -> Self {
+        let mut hash = ShortMessageHash::new();
+        hash.feed_u64(sequence);
+        hash.feed_str(thread.as_str());
+        hash.feed_str(from.as_str());
+        hash.feed_str(to.as_str());
+        hash.feed_str(body);
+        Self(format!("m-{}", hash.finish_base32()))
+    }
+
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ShortMessageHash {
+    value: u64,
+}
+
+impl ShortMessageHash {
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    const ALPHABET: &'static [u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
+
+    fn new() -> Self {
+        Self {
+            value: Self::OFFSET,
+        }
+    }
+
+    fn feed_u64(&mut self, value: u64) {
+        self.feed_bytes(value.to_le_bytes().as_slice());
+    }
+
+    fn feed_str(&mut self, text: &str) {
+        self.feed_u64(text.len() as u64);
+        self.feed_bytes(text.as_bytes());
+    }
+
+    fn feed_bytes(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.value ^= u64::from(*byte);
+            self.value = self.value.wrapping_mul(Self::PRIME);
+        }
+    }
+
+    fn finish_base32(self) -> String {
+        let mut value = self.value;
+        let mut text = String::with_capacity(7);
+        for _ in 0..7 {
+            text.push(Self::ALPHABET[(value & 31) as usize] as char);
+            value >>= 5;
+        }
+        text
     }
 }
 

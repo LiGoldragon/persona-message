@@ -122,6 +122,8 @@ fn command_line_send_stamps_resolved_sender() {
     let messages = store.messages().expect("messages read");
 
     assert_eq!(messages.len(), 1);
+    assert!(messages[0].id.as_str().starts_with("m-"));
+    assert_eq!(messages[0].id.as_str().len(), 9);
     assert_eq!(messages[0].from.as_str(), "operator");
     assert_eq!(messages[0].to.as_str(), "designer");
     assert!(
