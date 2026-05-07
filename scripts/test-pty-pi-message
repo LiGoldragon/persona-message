@@ -138,10 +138,9 @@ wait_for_message() {
   local timeout="$4"
   local deadline=$((SECONDS + timeout))
   while (( SECONDS < deadline )); do
-    if [[ -f "$store/messages.nota.log" ]] \
-      && rg -q --fixed-strings "$from" "$store/messages.nota.log" \
-      && rg -q --fixed-strings "$to" "$store/messages.nota.log" \
-      && rg -q --fixed-strings "$body" "$store/messages.nota.log"; then
+    if [[ -f "$store/messages.nota.log" ]] && rg --fixed-strings "direct-$from-$to" "$store/messages.nota.log" \
+      | rg --fixed-strings "$from $to" \
+      | rg -q --fixed-strings "$body"; then
       return 0
     fi
     sleep 1
@@ -173,7 +172,7 @@ cat > "$store/actors.nota" <<EOF
 (Actor responder $pid_b (EndpointTransport pty-socket "$socket_b" None))
 EOF
 
-setsid "$repo/target/debug/message-daemon" "$daemon_socket" >"$root/message-daemon.log" 2>&1 &
+PERSONA_MESSAGE_STORE="$store" setsid "$repo/target/debug/message-daemon" "$daemon_socket" >"$root/message-daemon.log" 2>&1 &
 printf '%s\n' "$!" > "$root/message-daemon.pid"
 for _ in $(seq 1 120); do
   [[ -S "$daemon_socket" ]] && break

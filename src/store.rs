@@ -94,10 +94,7 @@ impl MessageStore {
         let Some(actor) = actors.actor(&message.to) else {
             return Ok(false);
         };
-        let prompt = TerminalPrompt::from_text(format!(
-            "Incoming Persona message. Read the NOTA record, then respond according to your Persona instructions.\n{}",
-            message.to_nota()?
-        ));
+        let prompt = TerminalPrompt::from_text(message.to_nota()?);
         actor.deliver(&prompt)
     }
 

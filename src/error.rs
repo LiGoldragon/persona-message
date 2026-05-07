@@ -53,6 +53,12 @@ pub enum Error {
 
     #[error("daemon response was invalid: {got}")]
     InvalidDaemonResponse { got: String },
+
+    #[error("daemon binary frame is too large: {bytes} bytes")]
+    DaemonFrameTooLarge { bytes: usize },
+
+    #[error("daemon binary codec: {detail}")]
+    DaemonCodec { detail: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

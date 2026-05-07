@@ -1,13 +1,14 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
-use crate::command::{Accepted, InboxMessages, Input, Output, Send};
+use crate::command::{Accepted, InboxMessages, Input, Output};
 use crate::error::{Error, Result};
 use crate::resolver::ProcessAncestry;
-use crate::schema::{ActorId, expect_end};
+use crate::schema::expect_end;
 use crate::store::{MessageStore, StorePath};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,20 +48,20 @@ impl MessageDaemon {
         let _ = std::fs::remove_file(self.socket.path());
         let listener = UnixListener::bind(self.socket.path())?;
         for stream in listener.incoming() {
-            let stream = stream?;
-            self.handle_stream(stream)?;
+            match stream {
+                Ok(stream) => self.handle_stream(stream),
+                Err(error) => Err(error.into()),
+            }
+            .unwrap_or_else(|error| eprintln!("message-daemon client error: {error}"));
         }
         Ok(())
     }
 
     fn handle_stream(&self, stream: UnixStream) -> Result<()> {
-        let reader = stream.try_clone()?;
-        let mut reader = BufReader::new(reader);
-        let mut request = String::new();
-        reader.read_line(&mut request)?;
-        let response = DaemonRequest::from_nota(&request)?.execute(&self.store)?;
+        let envelope = DaemonFrame::from_stream(&stream)?.decode()?;
+        let response = envelope.execute(&self.store)?;
         let mut writer = stream;
-        writeln!(writer, "{}", response.to_nota()?)?;
+        DaemonFrame::from_envelope(&response)?.write_to(&mut writer)?;
         Ok(())
     }
 }
@@ -78,38 +79,46 @@ impl MessageDaemonClient {
     pub fn submit(&self, input: Input) -> Result<String> {
         let request = DaemonRequest::from_input(std::process::id(), input);
         let mut stream = UnixStream::connect(self.socket.path())?;
-        writeln!(stream, "{}", request.to_nota()?)?;
-        let mut reader = BufReader::new(stream);
-        let mut response = String::new();
-        reader.read_line(&mut response)?;
-        if response.trim().is_empty() {
-            return Err(Error::InvalidDaemonResponse { got: response });
-        }
-        Ok(response)
+        DaemonFrame::from_envelope(&DaemonEnvelope::Request(request))?.write_to(&mut stream)?;
+        let output = DaemonFrame::from_stream(&stream)?.decode()?.into_output()?;
+        let mut text = output.to_nota()?;
+        text.push('\n');
+        Ok(text)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum DaemonEnvelope {
+    Request(DaemonRequest),
+    Response(Output),
+}
+
+impl DaemonEnvelope {
+    pub fn execute(self, store: &MessageStore) -> Result<Self> {
+        match self {
+            Self::Request(request) => Ok(Self::Response(request.execute(store)?)),
+            Self::Response(output) => Ok(Self::Response(output)),
+        }
+    }
+
+    pub fn into_output(self) -> Result<Output> {
+        match self {
+            Self::Response(output) => Ok(output),
+            Self::Request(_) => Err(Error::InvalidDaemonResponse {
+                got: "request envelope received where response was expected".to_string(),
+            }),
+        }
+    }
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum DaemonRequest {
-    Send(DaemonSend),
-    Inbox(DaemonInbox),
+    Input(DaemonInput),
 }
 
 impl DaemonRequest {
     pub fn from_input(pid: u32, input: Input) -> Self {
-        match input {
-            Input::Send(send) => Self::Send(DaemonSend {
-                pid,
-                recipient: send.recipient,
-                body: send.body,
-            }),
-            Input::Inbox(inbox) => Self::Inbox(DaemonInbox {
-                recipient: inbox.recipient,
-            }),
-            Input::Tail(_) => Self::Inbox(DaemonInbox {
-                recipient: ActorId::new("operator"),
-            }),
-        }
+        Self::Input(DaemonInput { pid, input })
     }
 
     pub fn from_nota(text: &str) -> Result<Self> {
@@ -127,11 +136,7 @@ impl DaemonRequest {
 
     pub fn execute(self, store: &MessageStore) -> Result<Output> {
         match self {
-            Self::Send(send) => send.execute(store),
-            Self::Inbox(inbox) => Ok(Output::InboxMessages(InboxMessages {
-                recipient: inbox.recipient.clone(),
-                messages: store.inbox(&inbox.recipient)?,
-            })),
+            Self::Input(input) => input.execute(store),
         }
     }
 }
@@ -139,8 +144,7 @@ impl DaemonRequest {
 impl NotaEncode for DaemonRequest {
     fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
         match self {
-            Self::Send(request) => request.encode(encoder),
-            Self::Inbox(request) => request.encode(encoder),
+            Self::Input(input) => input.encode(encoder),
         }
     }
 }
@@ -149,8 +153,7 @@ impl NotaDecode for DaemonRequest {
     fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
         let head = decoder.peek_record_head()?;
         match head.as_str() {
-            "DaemonSend" => Ok(Self::Send(DaemonSend::decode(decoder)?)),
-            "DaemonInbox" => Ok(Self::Inbox(DaemonInbox::decode(decoder)?)),
+            "DaemonInput" => Ok(Self::Input(DaemonInput::decode(decoder)?)),
             other => Err(nota_codec::Error::UnknownKindForVerb {
                 verb: "DaemonRequest",
                 got: other.to_string(),
@@ -159,31 +162,84 @@ impl NotaDecode for DaemonRequest {
     }
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
-pub struct DaemonSend {
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct DaemonInput {
     pub pid: u32,
-    pub recipient: ActorId,
-    pub body: String,
+    pub input: Input,
 }
 
-impl DaemonSend {
+impl DaemonInput {
     pub fn execute(self, store: &MessageStore) -> Result<Output> {
         let ancestry = ProcessAncestry::from_process(self.pid)?;
         let sender = store.resolve_sender_from_ancestry(&ancestry)?;
-        let message = Send {
-            recipient: self.recipient,
-            body: self.body,
+        match self.input {
+            Input::Send(send) => {
+                let message = send.into_message(sender, store.next_sequence()?);
+                store.append(&message)?;
+                store.deliver(&message)?;
+                Ok(Output::Accepted(Accepted { message }))
+            }
+            Input::Inbox(inbox) => Ok(Output::InboxMessages(InboxMessages {
+                recipient: inbox.recipient.clone(),
+                messages: store.inbox(&inbox.recipient)?,
+            })),
+            Input::Tail(_) => Ok(Output::InboxMessages(InboxMessages {
+                recipient: sender.clone(),
+                messages: store.inbox(&sender)?,
+            })),
         }
-        .into_message(sender, store.next_sequence()?);
-        store.append(&message)?;
-        store.deliver(&message)?;
-        Ok(Output::Accepted(Accepted { message }))
     }
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
-pub struct DaemonInbox {
-    pub recipient: ActorId,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonFrame {
+    bytes: Vec<u8>,
+}
+
+impl DaemonFrame {
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+
+    pub fn from_envelope(envelope: &DaemonEnvelope) -> Result<Self> {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(envelope).map_err(|error| {
+            Error::DaemonCodec {
+                detail: error.to_string(),
+            }
+        })?;
+        Ok(Self {
+            bytes: bytes.into(),
+        })
+    }
+
+    pub fn from_stream(mut stream: &UnixStream) -> Result<Self> {
+        let mut header = [0_u8; 4];
+        stream.read_exact(&mut header)?;
+        let length = u32::from_le_bytes(header) as usize;
+        if length > Self::MAX_BYTES {
+            return Err(Error::DaemonFrameTooLarge { bytes: length });
+        }
+        let mut bytes = vec![0_u8; length];
+        stream.read_exact(&mut bytes)?;
+        Ok(Self { bytes })
+    }
+
+    pub fn write_to(&self, stream: &mut UnixStream) -> Result<()> {
+        if self.bytes.len() > Self::MAX_BYTES {
+            return Err(Error::DaemonFrameTooLarge {
+                bytes: self.bytes.len(),
+            });
+        }
+        stream.write_all(&(self.bytes.len() as u32).to_le_bytes())?;
+        stream.write_all(&self.bytes)?;
+        Ok(())
+    }
+
+    pub fn decode(&self) -> Result<DaemonEnvelope> {
+        rkyv::from_bytes::<DaemonEnvelope, rkyv::rancor::Error>(&self.bytes).map_err(|error| {
+            Error::DaemonCodec {
+                detail: error.to_string(),
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

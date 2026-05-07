@@ -1,6 +1,9 @@
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord, NotaTransparent};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
-#[derive(NotaTransparent, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaTransparent, Debug, Clone, PartialEq, Eq, Hash,
+)]
 pub struct MessageId(String);
 
 impl MessageId {
@@ -13,7 +16,9 @@ impl MessageId {
     }
 }
 
-#[derive(NotaTransparent, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaTransparent, Debug, Clone, PartialEq, Eq, Hash,
+)]
 pub struct ThreadId(String);
 
 impl ThreadId {
@@ -26,7 +31,9 @@ impl ThreadId {
     }
 }
 
-#[derive(NotaTransparent, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaTransparent, Debug, Clone, PartialEq, Eq, Hash,
+)]
 pub struct ActorId(String);
 
 impl ActorId {
@@ -39,7 +46,7 @@ impl ActorId {
     }
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Actor {
     pub name: ActorId,
     pub pid: u32,
@@ -61,14 +68,14 @@ impl Actor {
     }
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct EndpointTransport {
     pub kind: EndpointKind,
     pub target: String,
     pub aux: Option<String>,
 }
 
-#[derive(NotaTransparent, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaTransparent, Debug, Clone, PartialEq, Eq)]
 pub struct EndpointKind(String);
 
 impl EndpointKind {
@@ -81,13 +88,13 @@ impl EndpointKind {
     }
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
     pub path: String,
     pub media_type: Option<String>,
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Message {
     pub id: MessageId,
     pub thread: ThreadId,

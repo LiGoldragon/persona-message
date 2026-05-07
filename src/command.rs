@@ -4,27 +4,28 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::daemon::{DaemonSocket, MessageDaemonClient};
 use crate::error::{Error, Result};
 use crate::schema::{ActorId, Message, MessageId, ThreadId, expect_end};
 use crate::store::MessageStore;
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Send {
     pub recipient: ActorId,
     pub body: String,
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Inbox {
     pub recipient: ActorId,
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Tail {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Input {
     Send(Send),
     Inbox(Inbox),
@@ -132,18 +133,18 @@ impl NotaDecode for Input {
     }
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Accepted {
     pub message: Message,
 }
 
-#[derive(NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct InboxMessages {
     pub recipient: ActorId,
     pub messages: Vec<Message>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Output {
     Accepted(Accepted),
     InboxMessages(InboxMessages),
