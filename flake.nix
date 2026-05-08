@@ -10,11 +10,12 @@
     crane.url = "github:ipetkov/crane";
 
     nota-codec.url = "github:LiGoldragon/nota-codec";
+    persona-system.url = "github:LiGoldragon/persona-system";
     persona-wezterm.url = "github:LiGoldragon/persona-wezterm";
   };
 
   outputs =
-    { self, nixpkgs, fenix, crane, nota-codec, persona-wezterm }:
+    { self, nixpkgs, fenix, crane, nota-codec, persona-system, persona-wezterm }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forSystems = function: nixpkgs.lib.genAttrs systems (system: function system);
@@ -31,6 +32,7 @@
           src = craneLib.cleanCargoSource ./.;
           siblingPathDependencies = ''
             cp -R ${nota-codec.outPath} ../nota-codec
+            cp -R ${persona-system.outPath} ../persona-system
             cp -R ${persona-wezterm.outPath} ../persona-wezterm
           '';
           cargoVendorDir = craneLib.vendorCargoDeps {
@@ -143,6 +145,12 @@
             export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-pty-pi-message} "$@"
+          '';
+          test-pty-pi-niri-focus = context.pkgs.writeShellScriptBin "persona-message-test-pty-pi-niri-focus" ''
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep context.pkgs.python3 ]}:$PATH
+            export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
+            export PERSONA_SYSTEM_BIN=''${PERSONA_SYSTEM_BIN:-${persona-system.packages.${system}.default}/bin/system}
+            exec ${context.pkgs.bash}/bin/bash ${./scripts/test-pty-pi-niri-focus} "$@"
           '';
           attach-pty-harnesses = context.pkgs.writeShellScriptBin "persona-message-attach-pty-harnesses" ''
             export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
@@ -261,6 +269,10 @@
           test-pty-pi-message = {
             type = "app";
             program = "${packages.test-pty-pi-message}/bin/persona-message-test-pty-pi-message";
+          };
+          test-pty-pi-niri-focus = {
+            type = "app";
+            program = "${packages.test-pty-pi-niri-focus}/bin/persona-message-test-pty-pi-niri-focus";
           };
           attach-pty-harnesses = {
             type = "app";

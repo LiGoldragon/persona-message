@@ -27,6 +27,17 @@ PERSONA_MESSAGE_STORE=.message message '(Inbox designer)'
 PERSONA_MESSAGE_STORE=.message message '(Tail)'
 ```
 
+The visible Pi focus harness test exercises the current Niri focus source
+against two real persistent Pi windows:
+
+```sh
+nix run .#test-pty-pi-niri-focus
+```
+
+It starts `initiator` and `responder` Pi harnesses with `qwen3.6-27b`, attaches
+visible WezTerm viewers, discovers their Niri window ids, subscribes through
+`persona-system`, and drives focus between the windows.
+
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through typed frames in
 `signal-persona`, durable commits in `persona-store`, and delivery policy in

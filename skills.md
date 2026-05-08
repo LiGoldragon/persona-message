@@ -15,6 +15,8 @@ Rules for work here:
   `flake.nix`.
 - Keep real harness tests interactive and persistent. Do not replace them with
   non-interactive `claude --print` or `codex exec` checks.
+- Use `scripts/test-pty-pi-niri-focus` when validating `persona-system` focus
+  observations against actual visible Pi harness windows.
 - Treat the local ledger as transitional development state. Do not deepen it
   into the final database surface.
 
