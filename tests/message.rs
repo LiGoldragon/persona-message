@@ -181,6 +181,85 @@ fn command_line_send_accepts_and_emits_bare_identifier_bodies() {
 }
 
 #[test]
+fn command_line_registers_actor_for_current_session() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
+    let command = CommandLine::from_arguments(["(Register operator None)"]);
+    let mut output = Vec::new();
+
+    command.run(&store, &mut output).expect("actor registers");
+
+    let actors = store.actors().expect("actors read");
+    let actor = actors
+        .actor(&ActorId::new("operator"))
+        .expect("registered actor exists");
+    assert!(actor.pid > 0);
+    assert_eq!(actor.endpoint, None);
+    assert!(
+        String::from_utf8(output)
+            .expect("output is utf8")
+            .contains("(Registered (Actor operator")
+    );
+}
+
+#[test]
+fn command_line_agents_lists_registered_actors() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
+    store
+        .register(&Actor {
+            name: ActorId::new("operator"),
+            pid: 10,
+            endpoint: None,
+        })
+        .expect("operator registers");
+    store
+        .register(&Actor {
+            name: ActorId::new("designer"),
+            pid: 20,
+            endpoint: None,
+        })
+        .expect("designer registers");
+    let command = CommandLine::from_arguments(["(Agents)"]);
+    let mut output = Vec::new();
+
+    command.run(&store, &mut output).expect("agents list");
+    let text = String::from_utf8(output).expect("output is utf8");
+
+    assert!(text.contains("(KnownActors ["));
+    assert!(text.contains("(Actor operator 10 None)"));
+    assert!(text.contains("(Actor designer 20 None)"));
+}
+
+#[test]
+fn register_replaces_existing_actor_endpoint() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
+    store
+        .register(&Actor {
+            name: ActorId::new("operator"),
+            pid: 10,
+            endpoint: None,
+        })
+        .expect("operator registers first");
+    let replacement = Actor {
+        name: ActorId::new("operator"),
+        pid: 11,
+        endpoint: Some(EndpointTransport {
+            kind: EndpointKind::new("human"),
+            target: "operator".to_string(),
+            aux: None,
+        }),
+    };
+
+    store.register(&replacement).expect("operator replaces");
+    let actors = store.actors().expect("actors read");
+
+    assert_eq!(actors.actors().len(), 1);
+    assert_eq!(actors.actor(&ActorId::new("operator")), Some(&replacement));
+}
+
+#[test]
 fn command_line_takes_exactly_one_argument() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let store = MessageStore::from_path(StorePath::from_path(directory.path()));

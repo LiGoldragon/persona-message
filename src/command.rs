@@ -7,7 +7,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::daemon::{DaemonSocket, MessageDaemonClient};
 use crate::error::{Error, Result};
-use crate::schema::{ActorId, Message, MessageId, ThreadId, expect_end};
+use crate::schema::{Actor, ActorId, EndpointTransport, Message, MessageId, ThreadId, expect_end};
 use crate::store::MessageStore;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
@@ -24,16 +24,27 @@ pub struct Inbox {
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Tail {}
 
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct Register {
+    pub name: ActorId,
+    pub endpoint: Option<EndpointTransport>,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct Agents {}
+
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Input {
     Send(Send),
     Inbox(Inbox),
     Tail(Tail),
+    Register(Register),
+    Agents(Agents),
 }
 
 impl Input {
     pub fn from_nota(text: &str) -> Result<Self> {
-        let mut decoder = Decoder::nota(text);
+        let mut decoder = Decoder::new(text);
         let input = Self::decode(&mut decoder)?;
         expect_end(&mut decoder)?;
         Ok(input)
@@ -61,6 +72,18 @@ impl Input {
                 store.tail(&recipient, stdout.lock())?;
                 unreachable!("tail returns only on error")
             }
+            Self::Register(register) => {
+                let actor = Actor {
+                    name: register.name,
+                    pid: store.registration_pid()?,
+                    endpoint: register.endpoint,
+                };
+                store.register(&actor)?;
+                Ok(Output::Registered(Registered { actor }))
+            }
+            Self::Agents(_) => Ok(Output::KnownActors(KnownActors {
+                actors: store.actors()?.actors().to_vec(),
+            })),
         }
     }
 
@@ -116,6 +139,8 @@ impl NotaEncode for Input {
             Self::Send(input) => input.encode(encoder),
             Self::Inbox(input) => input.encode(encoder),
             Self::Tail(input) => input.encode(encoder),
+            Self::Register(input) => input.encode(encoder),
+            Self::Agents(input) => input.encode(encoder),
         }
     }
 }
@@ -127,6 +152,8 @@ impl NotaDecode for Input {
             "Send" => Ok(Self::Send(Send::decode(decoder)?)),
             "Inbox" => Ok(Self::Inbox(Inbox::decode(decoder)?)),
             "Tail" => Ok(Self::Tail(Tail::decode(decoder)?)),
+            "Register" => Ok(Self::Register(Register::decode(decoder)?)),
+            "Agents" => Ok(Self::Agents(Agents::decode(decoder)?)),
             other => Err(nota_codec::Error::UnknownKindForVerb {
                 verb: "Input",
                 got: other.to_string(),
@@ -146,15 +173,27 @@ pub struct InboxMessages {
     pub messages: Vec<Message>,
 }
 
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct Registered {
+    pub actor: Actor,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct KnownActors {
+    pub actors: Vec<Actor>,
+}
+
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Output {
     Accepted(Accepted),
     InboxMessages(InboxMessages),
+    Registered(Registered),
+    KnownActors(KnownActors),
 }
 
 impl Output {
     pub fn to_nota(&self) -> Result<String> {
-        let mut encoder = Encoder::nota();
+        let mut encoder = Encoder::new();
         self.encode(&mut encoder)?;
         Ok(encoder.into_string())
     }
@@ -165,6 +204,8 @@ impl NotaEncode for Output {
         match self {
             Self::Accepted(output) => output.encode(encoder),
             Self::InboxMessages(output) => output.encode(encoder),
+            Self::Registered(output) => output.encode(encoder),
+            Self::KnownActors(output) => output.encode(encoder),
         }
     }
 }

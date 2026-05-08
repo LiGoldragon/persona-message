@@ -9,6 +9,8 @@ Rules for work here:
   belong in `signal-persona`.
 - Keep sender identity resolved by process ancestry and actor registration; do
   not trust sender fields written by a model.
+- Use `Register` and `Agents` for normal local actor setup and inspection.
+  Hand-edit `actors.nota` only when debugging the resolver itself.
 - Keep stateful harness workflows named under `scripts/` and exposed by
   `flake.nix`.
 - Keep real harness tests interactive and persistent. Do not replace them with
@@ -19,4 +21,3 @@ Rules for work here:
 Use component-to-component rkyv frames through `signal-persona` when the CLI or
 daemon crosses into router/store territory. Use NOTA only at CLI, harness, and
 audit projection boundaries.
-

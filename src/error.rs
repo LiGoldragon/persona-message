@@ -42,6 +42,9 @@ pub enum Error {
     #[error("process {pid} has no PPid field in /proc/{pid}/status")]
     MissingParentProcess { pid: u32 },
 
+    #[error("process ancestry is empty")]
+    EmptyProcessAncestry,
+
     #[error("process id {got:?} is invalid")]
     InvalidProcessId { got: String },
 

@@ -18,6 +18,7 @@ component traffic uses `signal-persona`; durable assembled state belongs behind
 ```mermaid
 flowchart LR
     "human or harness" -->|"NOTA Send"| "message CLI"
+    "message CLI" -->|"Register"| "actors.nota"
     "actors.nota" -->|"process ancestry"| "message CLI"
     "message CLI" -->|"typed validation"| "local message ledger"
     "message CLI" -->|"Frame request"| "signal-persona"
@@ -31,6 +32,7 @@ flowchart LR
 - `message` CLI for NOTA input/output;
 - `message-daemon` as the transitional daemon surface;
 - local actor resolution from process ancestry;
+- actor registration and listing through `Register` and `Agents`;
 - local append/read surfaces for message tests;
 - stateful harness scripts exposed through Nix apps.
 
@@ -51,7 +53,7 @@ In the assembled runtime:
 
 This repo owns:
 
-- NOTA `Send`, `Inbox`, and `Tail` CLI surfaces;
+- NOTA `Register`, `Agents`, `Send`, `Inbox`, and `Tail` CLI surfaces;
 - sender resolution from process ancestry;
 - human/harness message projection;
 - stateful real-harness test scripts.
@@ -67,6 +69,8 @@ This repo does not own:
 ## 4 · Invariants
 
 - Sender identity is trusted from process ancestry, not model text.
+- Agents register their local process identity before sending; ad hoc
+  `actors.nota` edits are a fallback for debugging, not the normal path.
 - NOTA input is decoded into typed Rust before it affects state.
 - Harness tests target interactive persistent harnesses, not non-interactive
   provider commands.

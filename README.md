@@ -8,16 +8,18 @@ The shared binary contract now belongs to `signal-persona`. This repository
 remains useful as the text boundary for harnesses and humans: NOTA in, typed
 validation, NOTA projection out.
 
-The first harness-to-harness path is deliberately small. The test setup writes
-an `actors.nota` file that maps harness names to parent process IDs:
+The first harness-to-harness path is deliberately small. A harness registers
+the process identity that should own its outbound messages:
 
-```nota
-(Actor operator 12345 None)
-(Actor designer 12346 None)
+```sh
+PERSONA_MESSAGE_STORE=.message message '(Register operator None)'
+PERSONA_MESSAGE_STORE=.message message '(Agents)'
 ```
 
-Harnesses send with `Send`; the binary resolves the sender from process
-ancestry and writes the full stored `Message`:
+`Register` writes the same typed `Actor` records that tests used to hand-write
+in `actors.nota`, but keeps the sender PID minted by infrastructure instead of
+model text. Harnesses then send with `Send`; the binary resolves the sender
+from process ancestry and writes the full stored `Message`:
 
 ```sh
 PERSONA_MESSAGE_STORE=.message message '(Send designer "Need a layout pass.")'

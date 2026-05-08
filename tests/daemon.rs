@@ -65,6 +65,16 @@ impl DaemonFixture {
             .expect("sender process starts")
     }
 
+    fn run_shell(&self, script: &str) -> std::process::Output {
+        Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .env("PERSONA_MESSAGE_STORE", &self.store)
+            .env("PERSONA_MESSAGE_DAEMON", &self.socket)
+            .output()
+            .expect("message shell runs")
+    }
+
     fn write_actors(&self, actors: &[(&str, u32)]) {
         let text = actors
             .iter()
@@ -113,4 +123,21 @@ fn cli_clients_route_messages_through_daemon_actor_state() {
             && message.to.as_str() == "operator"
             && message.body == "reply"
     }));
+}
+
+#[test]
+fn daemon_registers_actor_for_calling_shell() {
+    let fixture = DaemonFixture::new();
+    let message = env!("CARGO_BIN_EXE_message");
+    let output = fixture.run_shell(&format!(
+        "'{message}' '(Register operator None)' && '{message}' '(Send designer hello)'"
+    ));
+
+    assert!(output.status.success());
+
+    let messages = fixture.messages().expect("messages read");
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].from.as_str(), "operator");
+    assert_eq!(messages[0].to.as_str(), "designer");
+    assert_eq!(messages[0].body.as_str(), "hello");
 }

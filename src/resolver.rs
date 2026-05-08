@@ -15,6 +15,20 @@ impl ActorIndex {
 
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)?;
+        Self::from_text(path, &text)
+    }
+
+    pub fn load_or_empty(path: &Path) -> Result<Self> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Self::from_text(path, &text),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(Self { actors: Vec::new() })
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn from_text(path: &Path, text: &str) -> Result<Self> {
         let mut actors = Vec::new();
         for (index, line) in text.lines().enumerate() {
             if line.trim().is_empty() {
@@ -28,6 +42,17 @@ impl ActorIndex {
             actors.push(actor);
         }
         Ok(Self { actors })
+    }
+
+    pub fn upsert(&mut self, actor: Actor) {
+        match self
+            .actors
+            .iter_mut()
+            .find(|entry| entry.name == actor.name)
+        {
+            Some(entry) => *entry = actor,
+            None => self.actors.push(actor),
+        }
     }
 
     pub fn resolve(&self, ancestry: &ProcessAncestry) -> Option<ActorId> {
@@ -77,6 +102,14 @@ impl ProcessAncestry {
 
     pub fn pids(&self) -> &[u32] {
         self.pids.as_slice()
+    }
+
+    pub fn registration_pid(&self) -> Result<u32> {
+        self.pids
+            .get(1)
+            .or_else(|| self.pids.first())
+            .copied()
+            .ok_or(Error::EmptyProcessAncestry)
     }
 }
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
-use crate::command::{Accepted, InboxMessages, Input, Output};
+use crate::command::{Accepted, InboxMessages, Input, KnownActors, Output, Registered};
 use crate::error::{Error, Result};
 use crate::resolver::ProcessAncestry;
 use crate::schema::expect_end;
@@ -122,14 +122,14 @@ impl DaemonRequest {
     }
 
     pub fn from_nota(text: &str) -> Result<Self> {
-        let mut decoder = Decoder::nota(text);
+        let mut decoder = Decoder::new(text);
         let request = Self::decode(&mut decoder)?;
         expect_end(&mut decoder)?;
         Ok(request)
     }
 
     pub fn to_nota(&self) -> Result<String> {
-        let mut encoder = Encoder::nota();
+        let mut encoder = Encoder::new();
         self.encode(&mut encoder)?;
         Ok(encoder.into_string())
     }
@@ -171,9 +171,9 @@ pub struct DaemonInput {
 impl DaemonInput {
     pub fn execute(self, store: &MessageStore) -> Result<Output> {
         let ancestry = ProcessAncestry::from_process(self.pid)?;
-        let sender = store.resolve_sender_from_ancestry(&ancestry)?;
         match self.input {
             Input::Send(send) => {
+                let sender = store.resolve_sender_from_ancestry(&ancestry)?;
                 let message = send.into_message(sender, store.next_sequence()?);
                 store.append(&message)?;
                 store.deliver(&message)?;
@@ -183,9 +183,24 @@ impl DaemonInput {
                 recipient: inbox.recipient.clone(),
                 messages: store.inbox(&inbox.recipient)?,
             })),
-            Input::Tail(_) => Ok(Output::InboxMessages(InboxMessages {
-                recipient: sender.clone(),
-                messages: store.inbox(&sender)?,
+            Input::Tail(_) => {
+                let sender = store.resolve_sender_from_ancestry(&ancestry)?;
+                Ok(Output::InboxMessages(InboxMessages {
+                    recipient: sender.clone(),
+                    messages: store.inbox(&sender)?,
+                }))
+            }
+            Input::Register(register) => {
+                let actor = crate::schema::Actor {
+                    name: register.name,
+                    pid: ancestry.registration_pid()?,
+                    endpoint: register.endpoint,
+                };
+                store.register(&actor)?;
+                Ok(Output::Registered(Registered { actor }))
+            }
+            Input::Agents(_) => Ok(Output::KnownActors(KnownActors {
+                actors: store.actors()?.actors().to_vec(),
             })),
         }
     }

@@ -522,14 +522,13 @@ name = "nota-codec"
 version = "0.1.0"
 dependencies = [
  "nota-derive",
- "rkyv",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "nota-derive"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#8684dacf9346c5523ab51d54fe742fe2608461f0"
+source = "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#599801220cfcd744432f0503d7ea3924507d6535"
 dependencies = [
  "proc-macro2",
  "quote",

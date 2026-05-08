@@ -184,11 +184,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1778144877,
-        "narHash": "sha256-nuZxmoFHEkrIlTDOB4o+d3zI1FBLc8O0Q+R4sns80O4=",
+        "lastModified": 1778246979,
+        "narHash": "sha256-8VwneAUq1+kur+o8uuvV8lxz8p3alFuT3EYMJsaQznc=",
         "owner": "LiGoldragon",
         "repo": "nota-codec",
-        "rev": "997e13242993d3049fb54b7b519c9420e9508107",
+        "rev": "adbdb6fa525159aacb5f815232c1c7ef6c9390a7",
         "type": "github"
       },
       "original": {

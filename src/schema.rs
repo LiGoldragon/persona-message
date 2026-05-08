@@ -164,14 +164,14 @@ pub struct Actor {
 
 impl Actor {
     pub fn from_nota(text: &str) -> nota_codec::Result<Self> {
-        let mut decoder = Decoder::nota(text);
+        let mut decoder = Decoder::new(text);
         let actor = Self::decode(&mut decoder)?;
         expect_end(&mut decoder)?;
         Ok(actor)
     }
 
     pub fn to_nota(&self) -> nota_codec::Result<String> {
-        let mut encoder = Encoder::nota();
+        let mut encoder = Encoder::new();
         self.encode(&mut encoder)?;
         Ok(encoder.into_string())
     }
@@ -215,14 +215,14 @@ pub struct Message {
 
 impl Message {
     pub fn from_nota(text: &str) -> nota_codec::Result<Self> {
-        let mut decoder = Decoder::nota(text);
+        let mut decoder = Decoder::new(text);
         let message = Self::decode(&mut decoder)?;
         expect_end(&mut decoder)?;
         Ok(message)
     }
 
     pub fn to_nota(&self) -> nota_codec::Result<String> {
-        let mut encoder = Encoder::nota();
+        let mut encoder = Encoder::new();
         self.encode(&mut encoder)?;
         Ok(encoder.into_string())
     }

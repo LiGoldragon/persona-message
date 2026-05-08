@@ -64,6 +64,24 @@ impl MessageStore {
         ActorIndex::load(&self.path.actor_index())
     }
 
+    pub fn registration_pid(&self) -> Result<u32> {
+        ProcessAncestry::current()?.registration_pid()
+    }
+
+    pub fn register(&self, actor: &Actor) -> Result<()> {
+        std::fs::create_dir_all(self.path.root())?;
+        let mut index = ActorIndex::load_or_empty(&self.path.actor_index())?;
+        index.upsert(actor.clone());
+        let text = index
+            .actors()
+            .iter()
+            .map(Actor::to_nota)
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .join("\n");
+        std::fs::write(self.path.actor_index(), format!("{text}\n"))?;
+        Ok(())
+    }
+
     pub fn resolve_sender(&self) -> Result<ActorId> {
         let ancestry = ProcessAncestry::current()?;
         self.resolve_sender_from_ancestry(&ancestry)
