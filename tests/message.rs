@@ -5,6 +5,9 @@ use persona_message::schema::{
     Actor, ActorId, EndpointKind, EndpointTransport, Message, MessageIdKind,
 };
 use persona_message::store::{MessageStore, StorePath};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
+use std::process::{Command, Stdio};
 
 #[test]
 fn message_round_trips_through_nota() {
@@ -197,6 +200,64 @@ fn command_line_send_accepts_and_emits_bare_identifier_bodies() {
 
     assert!(ledger.contains(" ready-token []"));
     assert!(!ledger.contains("\"ready-token\""));
+}
+
+#[test]
+fn command_line_send_can_route_through_persona_router() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store_path = directory.path().join("store");
+    let router_socket = directory.path().join("router.sock");
+    std::fs::create_dir_all(&store_path).expect("store directory");
+    let listener = UnixListener::bind(&router_socket).expect("router socket binds");
+    let message = env!("CARGO_BIN_EXE_message");
+    let start = directory.path().join("start");
+    let shell = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '(Send designer router-hello)'",
+            start.display(),
+            message
+        ))
+        .env("PERSONA_MESSAGE_STORE", &store_path)
+        .env("PERSONA_ROUTER_SOCKET", &router_socket)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("message shell starts");
+    let actor = Actor {
+        name: ActorId::new("operator"),
+        pid: shell.id(),
+        endpoint: None,
+    };
+    std::fs::write(
+        store_path.join("actors.nota"),
+        actor.to_nota().expect("actor encodes"),
+    )
+    .expect("actor index writes");
+
+    let router = std::thread::spawn(move || {
+        std::fs::write(&start, "").expect("start marker writes");
+        let (mut stream, _) = listener.accept().expect("router accepts");
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().expect("stream clones"))
+            .read_line(&mut line)
+            .expect("router input reads");
+        writeln!(stream, "(DeliveryChanged 1 0)").expect("router response writes");
+        line
+    });
+
+    let output = shell.wait_with_output().expect("message shell exits");
+    let route = router.join().expect("router thread joins");
+    let store = MessageStore::from_path(StorePath::from_path(&store_path));
+    let messages = store.messages().expect("messages read");
+
+    assert!(output.status.success());
+    assert!(route.starts_with("(RouteMessage (Message m-"));
+    assert!(route.contains(" direct-operator-designer operator designer router-hello []"));
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].from.as_str(), "operator");
+    assert_eq!(messages[0].to.as_str(), "designer");
+    assert_eq!(messages[0].body.as_str(), "router-hello");
 }
 
 #[test]

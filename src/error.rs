@@ -68,6 +68,9 @@ pub enum Error {
 
     #[error("daemon binary codec: {detail}")]
     DaemonCodec { detail: String },
+
+    #[error("router response was empty")]
+    RouterResponseEmpty,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

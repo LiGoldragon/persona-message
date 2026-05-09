@@ -203,6 +203,9 @@ EOF
 
 niri msg action focus-window --id "$responder_window" >/dev/null
 focus_body="router-focus-delivery"
+"$system_bin" "(ObserveFocus (NiriWindow $responder_window))" | while IFS= read -r observation; do
+  router_send "$observation" >"$root/focus-block-event.out"
+done
 router_send "(RouteMessage (Message m-rf1 direct-operator-responder operator responder $focus_body []))" >"$root/focus-route.out"
 rg --fixed-strings "(DeliveryChanged 0 1)" "$root/focus-route.out" >/dev/null
 if screen_contains "$socket_b" "$focus_body"; then
@@ -221,6 +224,7 @@ draft_body="human-draft"
 prompt_body="router-prompt-delivery"
 "$terminal_target/persona-wezterm-type" "$socket_b" "$draft_body"
 wait_screen_contains "$socket_b" "$draft_body"
+router_send "(PromptObservation responder Occupied)" >"$root/prompt-block-event.out"
 router_send "(RouteMessage (Message m-rp1 direct-operator-responder operator responder $prompt_body []))" >"$root/prompt-route.out"
 rg --fixed-strings "(DeliveryChanged 0 1)" "$root/prompt-route.out" >/dev/null
 if screen_contains "$socket_b" "$prompt_body"; then

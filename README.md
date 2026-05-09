@@ -59,6 +59,20 @@ routes one message while the responder window is focused, then routes another
 while the responder prompt contains a human draft. Both messages remain pending
 until pushed focus or prompt observations make delivery safe.
 
+The visible Pi router-relay test exercises trained harness messaging through
+the router:
+
+```sh
+nix run .#test-pty-pi-router-relay
+```
+
+It starts trained `initiator` and `responder` Pi harnesses, routes the first
+operator instruction through `message '(Send initiator ...)'`, then expects the
+agents to use `message` themselves: initiator messages responder, responder
+replies to initiator, and initiator reports completion to operator. The same
+run also verifies focus and prompt guards before releasing queued deliveries
+through pushed observations.
+
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through typed frames in
 `signal-persona`, durable commits in `persona-store`, and delivery policy in

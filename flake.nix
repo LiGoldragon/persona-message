@@ -164,6 +164,17 @@
             export PERSONA_SYSTEM_BIN=''${PERSONA_SYSTEM_BIN:-${persona-system.packages.${system}.default}/bin/system}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-pty-pi-router-delivery} "$@"
           '';
+          test-pty-pi-router-relay = context.pkgs.writeShellScriptBin "persona-message-test-pty-pi-router-relay" ''
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep context.pkgs.python3 ]}:$PATH
+            export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
+            export PERSONA_SYSTEM_BIN=''${PERSONA_SYSTEM_BIN:-${persona-system.packages.${system}.default}/bin/system}
+            exec ${context.pkgs.bash}/bin/bash ${./scripts/test-pty-pi-router-relay} "$@"
+          '';
+          debug-pty-pi-router-relay-state = context.pkgs.writeShellScriptBin "persona-message-debug-pty-pi-router-relay-state" ''
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep context.pkgs.python3 ]}:$PATH
+            export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
+            exec ${context.pkgs.bash}/bin/bash ${./scripts/debug-pty-pi-router-relay-state} "$@"
+          '';
           attach-pty-harnesses = context.pkgs.writeShellScriptBin "persona-message-attach-pty-harnesses" ''
             export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
@@ -198,6 +209,11 @@
             export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/teardown-pty-pi-router-delivery} "$@"
+          '';
+          teardown-pty-pi-router-relay = context.pkgs.writeShellScriptBin "persona-message-teardown-pty-pi-router-relay" ''
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
+            export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
+            exec ${context.pkgs.bash}/bin/bash ${./scripts/teardown-pty-pi-router-relay} "$@"
           '';
           default = context.craneLib.buildPackage (
             context.commonArgs
@@ -304,6 +320,14 @@
             type = "app";
             program = "${packages.test-pty-pi-router-delivery}/bin/persona-message-test-pty-pi-router-delivery";
           };
+          test-pty-pi-router-relay = {
+            type = "app";
+            program = "${packages.test-pty-pi-router-relay}/bin/persona-message-test-pty-pi-router-relay";
+          };
+          debug-pty-pi-router-relay-state = {
+            type = "app";
+            program = "${packages.debug-pty-pi-router-relay-state}/bin/persona-message-debug-pty-pi-router-relay-state";
+          };
           attach-pty-harnesses = {
             type = "app";
             program = "${packages.attach-pty-harnesses}/bin/persona-message-attach-pty-harnesses";
@@ -331,6 +355,10 @@
           teardown-pty-pi-router-delivery = {
             type = "app";
             program = "${packages.teardown-pty-pi-router-delivery}/bin/persona-message-teardown-pty-pi-router-delivery";
+          };
+          teardown-pty-pi-router-relay = {
+            type = "app";
+            program = "${packages.teardown-pty-pi-router-relay}/bin/persona-message-teardown-pty-pi-router-relay";
           };
         }
       );

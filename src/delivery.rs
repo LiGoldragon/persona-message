@@ -110,6 +110,10 @@ impl DeliveryGate {
             }
         }
         socket.send_prompt(prompt.as_str())?;
+        let capture = socket.capture()?.to_string_lossy();
+        if !capture.contains(prompt.as_str()) {
+            return Ok(DeliveryOutcome::deferred(DeliveryDeferral::PromptUnknown));
+        }
         Ok(DeliveryOutcome::delivered())
     }
 

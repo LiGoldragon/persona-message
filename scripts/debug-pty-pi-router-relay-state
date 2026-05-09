@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+terminal_repo="${PERSONA_WEZTERM_REPO:-$(cd "$repo/../persona-wezterm" && pwd)}"
+router_repo="${PERSONA_ROUTER_REPO:-$(cd "$repo/../persona-router" && pwd)}"
+terminal_target="$terminal_repo/target/debug"
+router_target="$router_repo/target/debug"
+
+root="${PERSONA_PTY_PI_ROUTER_RELAY_ROOT:-$(cat /tmp/persona-pty-pi-router-relay-current 2>/dev/null || true)}"
+if [[ -z "$root" || ! -d "$root" ]]; then
+  echo "no persona router relay root found"
+  exit 0
+fi
+
+cargo build --manifest-path "$terminal_repo/Cargo.toml" --bins >/dev/null
+cargo build --manifest-path "$router_repo/Cargo.toml" --bins >/dev/null
+
+echo "root=$root"
+echo
+echo "== session.env =="
+sed -n '1,160p' "$root/session.env" 2>/dev/null || true
+echo
+echo "== messages.nota.log =="
+sed -n '1,240p' "$root/store/messages.nota.log" 2>/dev/null || true
+echo
+echo "== router status =="
+if [[ -S "$root/router.sock" ]]; then
+  "$router_target/router" "$root/router.sock" "(Status)" || true
+else
+  echo "router socket missing"
+fi
+echo
+echo "== router command outputs =="
+for file in "$root"/*.out; do
+  [[ -f "$file" ]] || continue
+  echo "-- ${file##*/} --"
+  sed -n '1,80p' "$file" || true
+done
+echo
+echo "== router log =="
+sed -n '1,220p' "$root/router.log" 2>/dev/null || true
+echo
+echo "== daemon logs =="
+for file in "$root"/*.daemon.log; do
+  [[ -f "$file" ]] || continue
+  echo "-- ${file##*/} --"
+  sed -n '1,160p' "$file" || true
+done
+echo
+echo "== initiator screen =="
+if [[ -S "$root/initiator.sock" ]]; then
+  PERSONA_WEZTERM_CAPTURE_MODE=screen PERSONA_WEZTERM_CAPTURE_ROWS=35 PERSONA_WEZTERM_CAPTURE_COLUMNS=140 \
+    "$terminal_target/persona-wezterm-capture" "$root/initiator.sock" || true
+  echo
+  echo "== initiator raw markers =="
+  "$terminal_target/persona-wezterm-capture" "$root/initiator.sock" \
+    | rg --fixed-strings "Send responder" || true
+  "$terminal_target/persona-wezterm-capture" "$root/initiator.sock" \
+    | rg --fixed-strings "RouteMessage" || true
+  "$terminal_target/persona-wezterm-capture" "$root/initiator.sock" \
+    | rg --fixed-strings "(Message" || true
+else
+  echo "initiator socket missing"
+fi
+echo
+echo "== responder screen =="
+if [[ -S "$root/responder.sock" ]]; then
+  PERSONA_WEZTERM_CAPTURE_MODE=screen PERSONA_WEZTERM_CAPTURE_ROWS=35 PERSONA_WEZTERM_CAPTURE_COLUMNS=140 \
+    "$terminal_target/persona-wezterm-capture" "$root/responder.sock" || true
+  echo
+  echo "== responder raw markers =="
+  "$terminal_target/persona-wezterm-capture" "$root/responder.sock" \
+    | rg --fixed-strings "relay-reply" || true
+  "$terminal_target/persona-wezterm-capture" "$root/responder.sock" \
+    | rg --fixed-strings "(Message" || true
+else
+  echo "responder socket missing"
+fi

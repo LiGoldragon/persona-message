@@ -7,6 +7,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::daemon::{DaemonSocket, MessageDaemonClient};
 use crate::error::{Error, Result};
+use crate::router::RouterSocket;
 use crate::schema::{Actor, ActorId, EndpointTransport, Message, MessageId, ThreadId, expect_end};
 use crate::store::MessageStore;
 
@@ -107,6 +108,20 @@ impl Input {
             let response = MessageDaemonClient::from_socket(socket).submit(self)?;
             write!(output, "{response}")?;
             return Ok(());
+        }
+        if let Some(socket) = RouterSocket::from_environment() {
+            if let Self::Send(send) = self.clone() {
+                let sender = store.resolve_sender()?;
+                let message = send.into_message(sender, store.next_sequence()?);
+                let _reply = socket.client().route(&message)?;
+                store.append(&message)?;
+                writeln!(
+                    output,
+                    "{}",
+                    Output::Accepted(Accepted { message }).to_nota()?
+                )?;
+                return Ok(());
+            }
         }
         match self {
             Self::Tail(_) => unreachable!("tail returns before daemon routing"),

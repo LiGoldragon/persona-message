@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${PERSONA_PTY_PI_ROUTER_RELAY_ROOT:-$(cat /tmp/persona-pty-pi-router-relay-current 2>/dev/null || true)}"
+if [[ -z "$root" || ! -d "$root" ]]; then
+  echo "no persona router relay Pi root found"
+  exit 0
+fi
+
+for file in "$root"/*.viewer.pid "$root"/*.daemon.pid "$root"/*.pid "$root"/*.neutral.pid "$root"/*.router.pid; do
+  [[ -f "$file" ]] || continue
+  pid="$(cat "$file" 2>/dev/null || true)"
+  [[ "$pid" =~ ^[0-9]+$ ]] || continue
+  kill "$pid" 2>/dev/null || true
+done
+
+rm -f /tmp/persona-pty-pi-router-relay-current
+echo "torn_down=$root"

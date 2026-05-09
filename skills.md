@@ -24,6 +24,12 @@ Rules for work here:
   path. It registers Pi harnesses as actors, queues unsafe deliveries in
   `persona-router`, and releases them only after pushed focus or prompt
   observations arrive.
+- Use `scripts/test-pty-pi-router-relay` when validating that trained Pi
+  harnesses can use `message '(Send ...)'` themselves while the message CLI
+  routes through `persona-router`.
+- Use `scripts/debug-pty-pi-router-relay-state` for relay diagnostics. Do not
+  inspect relay state with one-off shell capture commands; keep the diagnostic
+  path named and exposed through Nix.
 - Treat the local ledger as transitional development state. Do not deepen it
   into the final database surface.
 
