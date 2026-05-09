@@ -13,7 +13,7 @@ projects typed message records back to NOTA.
 
 This repo is the text boundary, not the shared binary contract. Component-to-
 component traffic uses `signal-persona`; durable assembled state belongs behind
-`persona-store`.
+`persona-sema` and its store actor.
 
 ```mermaid
 flowchart LR
@@ -39,14 +39,15 @@ flowchart LR
 ## 2 · State and Ownership
 
 The current local ledger is development state. It keeps harness-to-harness tests
-usable before `persona-router` and `persona-store` fully own delivery and
-durable commits.
+usable before `persona-router` and the `persona-sema` store actor fully own
+delivery and durable commits.
 
 In the assembled runtime:
 
 - `persona-message` remains the NOTA CLI/projection layer;
 - `persona-router` owns routing and pending delivery;
-- `persona-store` owns durable transition ordering;
+- `persona-sema` owns typed storage tables;
+- the store actor owns durable transition ordering;
 - `signal-persona` owns the Rust wire records.
 
 ## 3 · Boundaries
@@ -94,5 +95,5 @@ tests/                 CLI, daemon, two-process, and harness tests
 
 - `../signal-persona/ARCHITECTURE.md`
 - `../persona-router/ARCHITECTURE.md`
-- `../persona-store/ARCHITECTURE.md`
+- `../persona-sema/ARCHITECTURE.md`
 - `../persona-wezterm/ARCHITECTURE.md`
