@@ -48,6 +48,17 @@ It binds actor endpoints to Niri window ids, creates a neutral focus window,
 proves delivery is deferred while the responder window is focused, then moves
 focus to neutral and flushes the pending message.
 
+The visible Pi router-delivery test exercises the router actor path:
+
+```sh
+nix run .#test-pty-pi-router-delivery
+```
+
+It starts the `persona-router` daemon, registers the Pi harnesses as actors,
+routes one message while the responder window is focused, then routes another
+while the responder prompt contains a human draft. Both messages remain pending
+until pushed focus or prompt observations make delivery safe.
+
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through typed frames in
 `signal-persona`, durable commits in `persona-store`, and delivery policy in

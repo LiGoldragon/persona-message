@@ -20,6 +20,10 @@ Rules for work here:
 - Use `scripts/test-pty-pi-guarded-delivery` when validating that terminal
   delivery defers while a target harness window is focused and delivers only
   after focus moves to a neutral window.
+- Use `scripts/test-pty-pi-router-delivery` when validating the router daemon
+  path. It registers Pi harnesses as actors, queues unsafe deliveries in
+  `persona-router`, and releases them only after pushed focus or prompt
+  observations arrive.
 - Treat the local ledger as transitional development state. Do not deepen it
   into the final database surface.
 

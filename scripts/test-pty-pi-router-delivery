@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${PERSONA_MESSAGE_REPO:-$PWD}"
+cd "$repo"
+terminal_repo="${PERSONA_WEZTERM_REPO:-$(cd "$repo/../persona-wezterm" && pwd)}"
+router_repo="${PERSONA_ROUTER_REPO:-$(cd "$repo/../persona-router" && pwd)}"
+system_repo="${PERSONA_SYSTEM_REPO:-$(cd "$repo/../persona-system" && pwd)}"
+terminal_target="$terminal_repo/target/debug"
+router_target="$router_repo/target/debug"
+system_bin="${PERSONA_SYSTEM_BIN:-$system_repo/target/debug/system}"
+
+cleanup_root() {
+  local root="$1"
+  [[ -n "$root" && -d "$root" ]] || return 0
+  for file in "$root"/*.daemon.pid "$root"/*.pid "$root"/*.viewer.pid "$root"/*.neutral.pid "$root"/*.router.pid; do
+    [[ -f "$file" ]] || continue
+    local pid
+    pid="$(cat "$file" 2>/dev/null || true)"
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done
+}
+
+current_file="/tmp/persona-pty-pi-router-current"
+if [[ -s "$current_file" && "${PERSONA_PI_ROUTER_KEEP_OLD:-0}" == 0 ]]; then
+  cleanup_root "$(cat "$current_file")"
+fi
+
+root="${PERSONA_PTY_PI_ROUTER_ROOT:-$(mktemp -d -t persona-pty-pi-router.XXXXXXXX)}"
+workspace="$root/workspace"
+socket_a="$root/initiator.sock"
+socket_b="$root/responder.sock"
+router_socket="$root/router.sock"
+mkdir -p "$workspace" "$root/sessions"
+
+cargo build --bin message
+cargo build --manifest-path "$terminal_repo/Cargo.toml" --bins
+cargo build --manifest-path "$router_repo/Cargo.toml" --bins
+if [[ ! -x "$system_bin" ]]; then
+  cargo build --manifest-path "$system_repo/Cargo.toml" --bin system
+fi
+
+pi_bin="${PERSONA_PI_BIN:-$(command -v pi)}"
+pi_model="${PERSONA_PI_MODEL:-prometheus/qwen3.6-27b}"
+pi_thinking="${PERSONA_PI_THINKING:-medium}"
+runner_path="$repo/target/debug:$terminal_target:$router_target:$PATH"
+
+start_agent() {
+  local actor="$1"
+  local socket="$2"
+  local workspace_dir="$workspace/$actor"
+  local runner="$root/run-$actor.sh"
+  local pid_file="$root/$actor.pid"
+  mkdir -p "$workspace_dir" "$root/sessions/$actor"
+  cat > "$runner" <<EOF
+#!/bin/sh
+set -eu
+cd '$workspace_dir'
+printf '%s\n' \$\$ > '$pid_file'
+export PATH='$runner_path'
+unset NO_COLOR
+export TERM=xterm-256color
+export COLORTERM=truecolor
+export CLICOLOR=1
+export FORCE_COLOR=1
+export PI_CODING_AGENT_SESSION_DIR='$root/sessions/$actor'
+exec '$pi_bin' --offline --model '$pi_model' --thinking '$pi_thinking' --tools bash --no-skills --no-context-files
+EOF
+  chmod +x "$runner"
+
+  setsid "$terminal_target/persona-wezterm-daemon" "$socket" "$runner" >"$root/$actor.daemon.log" 2>&1 &
+  printf '%s\n' "$!" > "$root/$actor.daemon.pid"
+  for _ in $(seq 1 120); do
+    [[ -S "$socket" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -S "$socket" ]]; then
+    echo "Pi PTY daemon did not create socket for $actor: $socket" >&2
+    sed -n '1,160p' "$root/$actor.daemon.log" >&2 || true
+    exit 1
+  fi
+  for _ in $(seq 1 200); do
+    [[ -s "$pid_file" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -s "$pid_file" ]]; then
+    echo "missing Pi harness pid file for $actor: $pid_file" >&2
+    exit 1
+  fi
+}
+
+start_viewer() {
+  local actor="$1"
+  local socket="$2"
+  local class="persona-pty-pi-router-$actor"
+  setsid wezterm start \
+    --always-new-process \
+    --class "$class" \
+    --workspace persona-pty-pi-router \
+    --cwd "$root" \
+    -- env PERSONA_WEZTERM_HANDSHAKE=1 PERSONA_WEZTERM_VIEW_TITLE="ROUTER-$actor" "$terminal_target/persona-wezterm-view" "$socket" >"$root/$actor.viewer.log" 2>&1 &
+  printf '%s\n' "$!" > "$root/$actor.viewer.pid"
+}
+
+start_neutral() {
+  setsid wezterm start \
+    --always-new-process \
+    --class persona-pty-pi-router-neutral \
+    --workspace persona-pty-pi-router \
+    --cwd "$root" \
+    -- sh -lc 'printf "PERSONA ROUTER NEUTRAL\n"; sleep 3600' >"$root/neutral.log" 2>&1 &
+  printf '%s\n' "$!" > "$root/neutral.pid"
+}
+
+window_id_for_app_id() {
+  local app_id="$1"
+  python3 - "$app_id" <<'PY'
+import json
+import subprocess
+import sys
+import time
+
+app_id = sys.argv[1]
+for _ in range(100):
+    data = json.loads(subprocess.check_output(["niri", "msg", "--json", "windows"]))
+    matches = [window for window in data if window.get("app_id") == app_id]
+    if matches:
+        print(matches[-1]["id"])
+        raise SystemExit(0)
+    time.sleep(0.1)
+raise SystemExit(f"no niri window for app_id={app_id}")
+PY
+}
+
+screen_contains() {
+  local socket="$1"
+  local needle="$2"
+  PERSONA_WEZTERM_CAPTURE_MODE=screen PERSONA_WEZTERM_CAPTURE_ROWS=32 PERSONA_WEZTERM_CAPTURE_COLUMNS=120 \
+    "$terminal_target/persona-wezterm-capture" "$socket" | rg --fixed-strings "$needle" >/dev/null
+}
+
+wait_screen_contains() {
+  local socket="$1"
+  local needle="$2"
+  for _ in $(seq 1 80); do
+    if screen_contains "$socket" "$needle"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "screen did not contain $needle" >&2
+  PERSONA_WEZTERM_CAPTURE_MODE=screen PERSONA_WEZTERM_CAPTURE_ROWS=32 PERSONA_WEZTERM_CAPTURE_COLUMNS=120 \
+    "$terminal_target/persona-wezterm-capture" "$socket" >&2 || true
+  return 1
+}
+
+router_send() {
+  local record="$1"
+  "$router_target/router" "$router_socket" "$record"
+}
+
+start_agent initiator "$socket_a"
+start_agent responder "$socket_b"
+start_viewer initiator "$socket_a"
+start_viewer responder "$socket_b"
+start_neutral
+
+setsid "$router_target/persona-router-daemon" "$router_socket" >"$root/router.log" 2>&1 &
+printf '%s\n' "$!" > "$root/router.pid"
+for _ in $(seq 1 120); do
+  [[ -S "$router_socket" ]] && break
+  sleep 0.1
+done
+if [[ ! -S "$router_socket" ]]; then
+  echo "router socket did not appear: $router_socket" >&2
+  sed -n '1,160p' "$root/router.log" >&2 || true
+  exit 1
+fi
+
+initiator_pid="$(cat "$root/initiator.pid")"
+responder_pid="$(cat "$root/responder.pid")"
+printf '%s\n' "$root" > "$current_file"
+
+initiator_window="$(window_id_for_app_id persona-pty-pi-router-initiator)"
+responder_window="$(window_id_for_app_id persona-pty-pi-router-responder)"
+neutral_window="$(window_id_for_app_id persona-pty-pi-router-neutral)"
+
+router_send "(RegisterActor (Actor initiator $initiator_pid (EndpointTransport pty-socket \"$socket_a\" \"niri-window:$initiator_window\")))" >"$root/register-initiator.out"
+router_send "(RegisterActor (Actor responder $responder_pid (EndpointTransport pty-socket \"$socket_b\" \"niri-window:$responder_window\")))" >"$root/register-responder.out"
+
+cat > "$root/session.env" <<EOF
+PERSONA_PTY_PI_ROUTER_ROOT=$root
+PERSONA_ROUTER_SOCKET=$router_socket
+PERSONA_INITIATOR_SOCKET=$socket_a
+PERSONA_RESPONDER_SOCKET=$socket_b
+PERSONA_INITIATOR_WINDOW=$initiator_window
+PERSONA_RESPONDER_WINDOW=$responder_window
+PERSONA_NEUTRAL_WINDOW=$neutral_window
+PERSONA_PI_MODEL=$pi_model
+PERSONA_PI_THINKING=$pi_thinking
+EOF
+
+niri msg action focus-window --id "$responder_window" >/dev/null
+focus_body="router-focus-delivery"
+router_send "(RouteMessage (Message m-rf1 direct-operator-responder operator responder $focus_body []))" >"$root/focus-route.out"
+rg --fixed-strings "(DeliveryChanged 0 1)" "$root/focus-route.out" >/dev/null
+if screen_contains "$socket_b" "$focus_body"; then
+  echo "focused router delivery reached responder unexpectedly" >&2
+  exit 1
+fi
+
+niri msg action focus-window --id "$neutral_window" >/dev/null
+"$system_bin" "(ObserveFocus (NiriWindow $responder_window))" | while IFS= read -r observation; do
+  router_send "$observation" >"$root/focus-event.out"
+done
+rg --fixed-strings "(DeliveryChanged 1 0)" "$root/focus-event.out" >/dev/null
+wait_screen_contains "$socket_b" "$focus_body"
+
+draft_body="human-draft"
+prompt_body="router-prompt-delivery"
+"$terminal_target/persona-wezterm-type" "$socket_b" "$draft_body"
+wait_screen_contains "$socket_b" "$draft_body"
+router_send "(RouteMessage (Message m-rp1 direct-operator-responder operator responder $prompt_body []))" >"$root/prompt-route.out"
+rg --fixed-strings "(DeliveryChanged 0 1)" "$root/prompt-route.out" >/dev/null
+if screen_contains "$socket_b" "$prompt_body"; then
+  echo "prompt-occupied router delivery reached responder unexpectedly" >&2
+  exit 1
+fi
+"$terminal_target/persona-wezterm-type" "$socket_b" $'\025'
+router_send "(PromptObservation responder Empty)" >"$root/prompt-event.out"
+rg --fixed-strings "(DeliveryChanged 1 0)" "$root/prompt-event.out" >/dev/null
+wait_screen_contains "$socket_b" "$prompt_body"
+
+echo "pi_router_delivery_test=passed"
+echo "root=$root"
+echo "router_socket=$router_socket"
+echo "initiator_window=$initiator_window"
+echo "responder_window=$responder_window"
+echo "neutral_window=$neutral_window"
+echo "teardown: PERSONA_PTY_PI_ROUTER_ROOT=$root scripts/teardown-pty-pi-router-delivery"
