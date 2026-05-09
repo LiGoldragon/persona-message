@@ -1,3 +1,4 @@
+use nota_codec::Error;
 use persona_message::command::{CommandLine, Input};
 use persona_message::delivery::PromptState;
 use persona_message::resolver::{ActorIndex, ProcessAncestry};
@@ -53,7 +54,7 @@ fn actor_endpoint_round_trips_with_owned_endpoint() {
         name: ActorId::new("designer"),
         pid: 42,
         endpoint: Some(EndpointTransport {
-            kind: EndpointKind::new("pty-socket"),
+            kind: EndpointKind::PtySocket,
             target: "/tmp/designer.sock".to_string(),
             aux: None,
         }),
@@ -62,6 +63,7 @@ fn actor_endpoint_round_trips_with_owned_endpoint() {
     let encoded = actor.to_nota().expect("actor encodes");
     let decoded = Actor::from_nota(&encoded).expect("actor decodes");
 
+    assert!(encoded.contains("PtySocket"));
     assert_eq!(decoded, actor);
     assert_eq!(
         Actor::from_nota("(Actor operator 7 None)")
@@ -71,7 +73,7 @@ fn actor_endpoint_round_trips_with_owned_endpoint() {
     );
     assert_eq!(
         Actor::from_nota(
-            r#"(Actor responder 77 (EndpointTransport pty-socket "/tmp/responder.sock" None))"#
+            r#"(Actor responder 77 (EndpointTransport PtySocket "/tmp/responder.sock" None))"#
         )
         .expect("pty actor decodes")
         .endpoint
@@ -83,12 +85,27 @@ fn actor_endpoint_round_trips_with_owned_endpoint() {
 }
 
 #[test]
+fn actor_endpoint_kind_rejects_unknown_transport() {
+    let err =
+        Actor::from_nota(r#"(Actor responder 77 (EndpointTransport Bogus "/tmp/socket" None))"#)
+            .expect_err("unknown endpoint transport is rejected");
+
+    match err {
+        Error::UnknownVariant { enum_name, got } => {
+            assert_eq!(enum_name, "EndpointKind");
+            assert_eq!(got, "Bogus");
+        }
+        other => panic!("expected UnknownVariant, got {other:?}"),
+    }
+}
+
+#[test]
 fn human_endpoint_does_not_inject_terminal_input() {
     let actor = Actor {
         name: ActorId::new("operator"),
         pid: std::process::id(),
         endpoint: Some(EndpointTransport {
-            kind: EndpointKind::new("human"),
+            kind: EndpointKind::Human,
             target: "operator".to_string(),
             aux: None,
         }),
@@ -326,7 +343,7 @@ fn register_replaces_existing_actor_endpoint() {
         name: ActorId::new("operator"),
         pid: 11,
         endpoint: Some(EndpointTransport {
-            kind: EndpointKind::new("human"),
+            kind: EndpointKind::Human,
             target: "operator".to_string(),
             aux: None,
         }),

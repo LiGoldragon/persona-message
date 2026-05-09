@@ -3,7 +3,7 @@ use persona_wezterm::pty::{PtyScreenSnapshot, PtySocket};
 use persona_wezterm::terminal::{TerminalPrompt, WezTermMux};
 
 use crate::error::{Error, Result};
-use crate::schema::{Actor, EndpointTransport};
+use crate::schema::{Actor, EndpointKind, EndpointTransport};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryOutcome {
@@ -71,11 +71,10 @@ impl DeliveryGate {
             return Ok(DeliveryOutcome::unreachable());
         };
 
-        match endpoint.kind.as_str() {
-            "human" => Ok(DeliveryOutcome::unreachable()),
-            "pty-socket" => self.deliver_to_pty_socket(endpoint, prompt),
-            "wezterm-pane" => self.deliver_to_wezterm_pane(endpoint, prompt),
-            _ => Ok(DeliveryOutcome::unreachable()),
+        match endpoint.kind {
+            EndpointKind::Human => Ok(DeliveryOutcome::unreachable()),
+            EndpointKind::PtySocket => self.deliver_to_pty_socket(endpoint, prompt),
+            EndpointKind::WezTermPane => self.deliver_to_wezterm_pane(endpoint, prompt),
         }
     }
 

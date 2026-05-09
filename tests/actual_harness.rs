@@ -177,7 +177,7 @@ impl ActualHarnessFixture {
         for (kind, pane) in agents {
             let pid = wait_for_file(&pane.pid_file, Duration::from_secs(20));
             lines.push(format!(
-                "(Actor {} {} (EndpointTransport wezterm-pane \"{}\" None))",
+                "(Actor {} {} (EndpointTransport WezTermPane \"{}\" None))",
                 kind.actor(),
                 pid.trim(),
                 pane.id

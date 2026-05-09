@@ -94,8 +94,8 @@ operator_pid="$(wait_pid "$root/operator.pid")"
 designer_pid="$(wait_pid "$root/designer.pid")"
 
 cat > "$store/actors.nota" <<EOF
-(Actor operator $operator_pid (EndpointTransport pty-socket "$root/operator.sock" None))
-(Actor designer $designer_pid (EndpointTransport pty-socket "$root/designer.sock" None))
+(Actor operator $operator_pid (EndpointTransport PtySocket "$root/operator.sock" None))
+(Actor designer $designer_pid (EndpointTransport PtySocket "$root/designer.sock" None))
 EOF
 
 cat > "$root/session.env" <<EOF

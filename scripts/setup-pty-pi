@@ -61,7 +61,7 @@ fi
 pi_pid="$(cat "$root/pi.pid")"
 
 cat > "$store/actors.nota" <<EOF
-(Actor pi $pi_pid (EndpointTransport pty-socket "$socket" None))
+(Actor pi $pi_pid (EndpointTransport PtySocket "$socket" None))
 EOF
 
 cat > "$root/session.env" <<EOF

@@ -159,11 +159,11 @@ pid_a="$(cat "$root/initiator.pid")"
 pid_b="$(cat "$root/responder.pid")"
 operator_pane="${PERSONA_OPERATOR_PANE_ID:-${WEZTERM_PANE:-None}}"
 operator_socket="${WEZTERM_UNIX_SOCKET:-None}"
-operator_endpoint="(EndpointTransport human operator None)"
+operator_endpoint="(EndpointTransport Human operator None)"
 cat > "$store/actors.nota" <<EOF
 (Actor operator $$ $operator_endpoint)
-(Actor initiator $pid_a (EndpointTransport pty-socket "$socket_a" None))
-(Actor responder $pid_b (EndpointTransport pty-socket "$socket_b" None))
+(Actor initiator $pid_a (EndpointTransport PtySocket "$socket_a" None))
+(Actor responder $pid_b (EndpointTransport PtySocket "$socket_b" None))
 EOF
 
 PERSONA_MESSAGE_STORE="$store" setsid "$repo/target/debug/message-daemon" "$daemon_socket" >"$root/message-daemon.log" 2>&1 &

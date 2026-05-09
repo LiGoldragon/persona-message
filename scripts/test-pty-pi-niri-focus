@@ -149,8 +149,8 @@ start_viewer responder "$socket_b"
 initiator_pid="$(cat "$root/initiator.pid")"
 responder_pid="$(cat "$root/responder.pid")"
 cat > "$store/actors.nota" <<EOF
-(Actor initiator $initiator_pid (EndpointTransport pty-socket "$socket_a" None))
-(Actor responder $responder_pid (EndpointTransport pty-socket "$socket_b" None))
+(Actor initiator $initiator_pid (EndpointTransport PtySocket "$socket_a" None))
+(Actor responder $responder_pid (EndpointTransport PtySocket "$socket_b" None))
 EOF
 
 cat > "$root/session.env" <<EOF

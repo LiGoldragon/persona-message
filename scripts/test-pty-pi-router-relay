@@ -253,14 +253,14 @@ responder_window="$(window_id_for_app_id persona-pty-pi-router-relay-responder)"
 neutral_window="$(window_id_for_app_id persona-pty-pi-router-relay-neutral)"
 
 cat > "$store/actors.nota" <<EOF
-(Actor operator $$ (EndpointTransport human operator None))
-(Actor initiator $initiator_pid (EndpointTransport pty-socket "$socket_initiator" "niri-window:$initiator_window"))
-(Actor responder $responder_pid (EndpointTransport pty-socket "$socket_responder" "niri-window:$responder_window"))
+(Actor operator $$ (EndpointTransport Human operator None))
+(Actor initiator $initiator_pid (EndpointTransport PtySocket "$socket_initiator" "niri-window:$initiator_window"))
+(Actor responder $responder_pid (EndpointTransport PtySocket "$socket_responder" "niri-window:$responder_window"))
 EOF
 
-router_send "(RegisterActor (Actor operator $$ (EndpointTransport human operator None)))" >"$root/register-operator.out"
-router_send "(RegisterActor (Actor initiator $initiator_pid (EndpointTransport pty-socket \"$socket_initiator\" \"niri-window:$initiator_window\")))" >"$root/register-initiator.out"
-router_send "(RegisterActor (Actor responder $responder_pid (EndpointTransport pty-socket \"$socket_responder\" \"niri-window:$responder_window\")))" >"$root/register-responder.out"
+router_send "(RegisterActor (Actor operator $$ (EndpointTransport Human operator None)))" >"$root/register-operator.out"
+router_send "(RegisterActor (Actor initiator $initiator_pid (EndpointTransport PtySocket \"$socket_initiator\" \"niri-window:$initiator_window\")))" >"$root/register-initiator.out"
+router_send "(RegisterActor (Actor responder $responder_pid (EndpointTransport PtySocket \"$socket_responder\" \"niri-window:$responder_window\")))" >"$root/register-responder.out"
 
 cat > "$root/session.env" <<EOF
 PERSONA_PTY_PI_ROUTER_RELAY_ROOT=$root

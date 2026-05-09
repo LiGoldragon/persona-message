@@ -186,8 +186,8 @@ initiator_window="$(window_id_for_app_id persona-pty-pi-router-initiator)"
 responder_window="$(window_id_for_app_id persona-pty-pi-router-responder)"
 neutral_window="$(window_id_for_app_id persona-pty-pi-router-neutral)"
 
-router_send "(RegisterActor (Actor initiator $initiator_pid (EndpointTransport pty-socket \"$socket_a\" \"niri-window:$initiator_window\")))" >"$root/register-initiator.out"
-router_send "(RegisterActor (Actor responder $responder_pid (EndpointTransport pty-socket \"$socket_b\" \"niri-window:$responder_window\")))" >"$root/register-responder.out"
+router_send "(RegisterActor (Actor initiator $initiator_pid (EndpointTransport PtySocket \"$socket_a\" \"niri-window:$initiator_window\")))" >"$root/register-initiator.out"
+router_send "(RegisterActor (Actor responder $responder_pid (EndpointTransport PtySocket \"$socket_b\" \"niri-window:$responder_window\")))" >"$root/register-responder.out"
 
 cat > "$root/session.env" <<EOF
 PERSONA_PTY_PI_ROUTER_ROOT=$root

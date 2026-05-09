@@ -109,11 +109,11 @@ designer_pid="$(wait_pid "$workspace/designer.pid")"
 
 wezterm_socket="${WEZTERM_UNIX_SOCKET:-None}"
 if [[ "$wezterm_socket" == None ]]; then
-  operator_endpoint="(EndpointTransport wezterm-pane \"$operator_pane\" None)"
-  designer_endpoint="(EndpointTransport wezterm-pane \"$designer_pane\" None)"
+  operator_endpoint="(EndpointTransport WezTermPane \"$operator_pane\" None)"
+  designer_endpoint="(EndpointTransport WezTermPane \"$designer_pane\" None)"
 else
-  operator_endpoint="(EndpointTransport wezterm-pane \"$operator_pane\" \"$wezterm_socket\")"
-  designer_endpoint="(EndpointTransport wezterm-pane \"$designer_pane\" \"$wezterm_socket\")"
+  operator_endpoint="(EndpointTransport WezTermPane \"$operator_pane\" \"$wezterm_socket\")"
+  designer_endpoint="(EndpointTransport WezTermPane \"$designer_pane\" \"$wezterm_socket\")"
 fi
 
 cat > "$store/actors.nota" <<EOF

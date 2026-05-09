@@ -171,9 +171,9 @@ printf '%s\n' "$responder_window" > "$root/responder.niri-window"
 printf '%s\n' "$neutral_window" > "$root/neutral.niri-window"
 
 cat > "$store/actors.nota" <<EOF
-(Actor operator $$ (EndpointTransport human operator None))
-(Actor initiator $initiator_pid (EndpointTransport pty-socket "$socket_a" "niri-window:$initiator_window"))
-(Actor responder $responder_pid (EndpointTransport pty-socket "$socket_b" "niri-window:$responder_window"))
+(Actor operator $$ (EndpointTransport Human operator None))
+(Actor initiator $initiator_pid (EndpointTransport PtySocket "$socket_a" "niri-window:$initiator_window"))
+(Actor responder $responder_pid (EndpointTransport PtySocket "$socket_b" "niri-window:$responder_window"))
 EOF
 
 cat > "$root/session.env" <<EOF
