@@ -9,13 +9,17 @@
 
     crane.url = "github:ipetkov/crane";
 
-    nota-codec.url = "github:LiGoldragon/nota-codec";
     persona-system.url = "github:LiGoldragon/persona-system";
-    persona-wezterm.url = "github:LiGoldragon/persona-wezterm";
   };
 
   outputs =
-    { self, nixpkgs, fenix, crane, nota-codec, persona-system, persona-wezterm }:
+    {
+      self,
+      nixpkgs,
+      fenix,
+      crane,
+      persona-system,
+    }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forSystems = function: nixpkgs.lib.genAttrs systems (system: function system);
@@ -30,19 +34,9 @@
           };
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
           src = craneLib.cleanCargoSource ./.;
-          siblingPathDependencies = ''
-            cp -R ${nota-codec.outPath} ../nota-codec
-            cp -R ${persona-system.outPath} ../persona-system
-            cp -R ${persona-wezterm.outPath} ../persona-wezterm
-          '';
-          cargoVendorDir = craneLib.vendorCargoDeps {
-            inherit src;
-            preConfigure = siblingPathDependencies;
-          };
           commonArgs = {
-            inherit src cargoVendorDir;
+            inherit src;
             strictDeps = true;
-            preConfigure = siblingPathDependencies;
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         in
