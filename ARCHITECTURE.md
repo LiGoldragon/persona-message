@@ -3,7 +3,7 @@
 *Human and harness NOTA boundary for Persona messages.*
 
 `persona-message` owns the `message` CLI and the transitional message ledger
-used while the router and store are being assembled. It validates NOTA input
+used while the router and durable state are being assembled. It validates NOTA input
 from a human or harness, resolves sender identity from the running process, and
 projects typed message records back to NOTA.
 
@@ -12,8 +12,8 @@ projects typed message records back to NOTA.
 ## 0 · TL;DR
 
 This repo is the text boundary, not the shared binary contract. Component-to-
-component traffic uses `signal-persona`; durable assembled state belongs behind
-`persona-sema` and its store actor.
+component traffic uses `signal-persona-message`; durable assembled state belongs
+to the router's `persona-sema`-backed state.
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,7 @@ flowchart LR
     "message CLI" -->|"Register"| "actors.nota"
     "actors.nota" -->|"process ancestry"| "message CLI"
     "message CLI" -->|"typed validation"| "local message ledger"
-    "message CLI" -->|"Frame request"| "signal-persona"
+    "message CLI" -->|"Frame request"| "signal-persona-message"
     "persona-router" -->|"pre-harness NOTA projection"| "message CLI"
 ```
 
@@ -39,16 +39,16 @@ flowchart LR
 ## 2 · State and Ownership
 
 The current local ledger is development state. It keeps harness-to-harness tests
-usable before `persona-router` and the `persona-sema` store actor fully own
-delivery and durable commits.
+usable before `persona-router` fully owns delivery and router-scoped durable
+commits.
 
 In the assembled runtime:
 
 - `persona-message` remains the NOTA CLI/projection layer;
-- `persona-router` owns routing and pending delivery;
-- `persona-sema` owns typed storage tables;
-- the store actor owns durable transition ordering;
-- `signal-persona` owns the Rust wire records.
+- `persona-router` owns routing, pending delivery, and durable message
+  transitions;
+- `persona-router` uses `persona-sema` for typed storage tables;
+- `signal-persona-message` owns the message channel wire records.
 
 ## 3 · Boundaries
 
@@ -94,6 +94,7 @@ tests/                 CLI, daemon, two-process, and harness tests
 ## See Also
 
 - `../signal-persona/ARCHITECTURE.md`
+- `../signal-persona-message/ARCHITECTURE.md`
 - `../persona-router/ARCHITECTURE.md`
 - `../persona-sema/ARCHITECTURE.md`
 - `../persona-wezterm/ARCHITECTURE.md`
