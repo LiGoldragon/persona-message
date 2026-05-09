@@ -38,6 +38,16 @@ It starts `initiator` and `responder` Pi harnesses with `qwen3.6-27b`, attaches
 visible WezTerm viewers, discovers their Niri window ids, subscribes through
 `persona-system`, and drives focus between the windows.
 
+The visible Pi guarded-delivery test exercises the transitional delivery gate:
+
+```sh
+nix run .#test-pty-pi-guarded-delivery
+```
+
+It binds actor endpoints to Niri window ids, creates a neutral focus window,
+proves delivery is deferred while the responder window is focused, then moves
+focus to neutral and flushes the pending message.
+
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through typed frames in
 `signal-persona`, durable commits in `persona-store`, and delivery policy in

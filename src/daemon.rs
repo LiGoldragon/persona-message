@@ -202,6 +202,13 @@ impl DaemonInput {
             Input::Agents(_) => Ok(Output::KnownActors(KnownActors {
                 actors: store.actors()?.actors().to_vec(),
             })),
+            Input::Flush(_) => {
+                let report = store.flush()?;
+                Ok(Output::Flushed(crate::command::Flushed {
+                    delivered: report.delivered as u64,
+                    deferred: report.deferred.len() as u64,
+                }))
+            }
         }
     }
 }

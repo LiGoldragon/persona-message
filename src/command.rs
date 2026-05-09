@@ -33,6 +33,9 @@ pub struct Register {
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Agents {}
 
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct Flush {}
+
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Input {
     Send(Send),
@@ -40,6 +43,7 @@ pub enum Input {
     Tail(Tail),
     Register(Register),
     Agents(Agents),
+    Flush(Flush),
 }
 
 impl Input {
@@ -84,6 +88,13 @@ impl Input {
             Self::Agents(_) => Ok(Output::KnownActors(KnownActors {
                 actors: store.actors()?.actors().to_vec(),
             })),
+            Self::Flush(_) => {
+                let report = store.flush()?;
+                Ok(Output::Flushed(Flushed {
+                    delivered: report.delivered as u64,
+                    deferred: report.deferred.len() as u64,
+                }))
+            }
         }
     }
 
@@ -141,6 +152,7 @@ impl NotaEncode for Input {
             Self::Tail(input) => input.encode(encoder),
             Self::Register(input) => input.encode(encoder),
             Self::Agents(input) => input.encode(encoder),
+            Self::Flush(input) => input.encode(encoder),
         }
     }
 }
@@ -154,6 +166,7 @@ impl NotaDecode for Input {
             "Tail" => Ok(Self::Tail(Tail::decode(decoder)?)),
             "Register" => Ok(Self::Register(Register::decode(decoder)?)),
             "Agents" => Ok(Self::Agents(Agents::decode(decoder)?)),
+            "Flush" => Ok(Self::Flush(Flush::decode(decoder)?)),
             other => Err(nota_codec::Error::UnknownKindForVerb {
                 verb: "Input",
                 got: other.to_string(),
@@ -183,12 +196,19 @@ pub struct KnownActors {
     pub actors: Vec<Actor>,
 }
 
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct Flushed {
+    pub delivered: u64,
+    pub deferred: u64,
+}
+
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Output {
     Accepted(Accepted),
     InboxMessages(InboxMessages),
     Registered(Registered),
     KnownActors(KnownActors),
+    Flushed(Flushed),
 }
 
 impl Output {
@@ -206,6 +226,7 @@ impl NotaEncode for Output {
             Self::InboxMessages(output) => output.encode(encoder),
             Self::Registered(output) => output.encode(encoder),
             Self::KnownActors(output) => output.encode(encoder),
+            Self::Flushed(output) => output.encode(encoder),
         }
     }
 }

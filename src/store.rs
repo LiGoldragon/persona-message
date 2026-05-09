@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
+use crate::delivery::{DeliveryGate, DeliveryOutcome};
 use crate::error::{Error, Result};
 use crate::resolver::{ActorIndex, ProcessAncestry};
 use crate::schema::{Actor, ActorId, Message};
-use persona_wezterm::pty::PtySocket;
-use persona_wezterm::terminal::{TerminalPrompt, WezTermMux};
+use persona_wezterm::terminal::TerminalPrompt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorePath {
@@ -39,6 +39,10 @@ impl StorePath {
 
     pub fn message_log(&self) -> PathBuf {
         self.root.join("messages.nota.log")
+    }
+
+    pub fn pending_log(&self) -> PathBuf {
+        self.root.join("pending.nota.log")
     }
 }
 
@@ -107,13 +111,29 @@ impl MessageStore {
         Ok(())
     }
 
-    pub fn deliver(&self, message: &Message) -> Result<bool> {
+    pub fn deliver(&self, message: &Message) -> Result<DeliveryOutcome> {
         let actors = self.actors()?;
         let Some(actor) = actors.actor(&message.to) else {
-            return Ok(false);
+            return Ok(DeliveryOutcome::unreachable());
         };
         let prompt = TerminalPrompt::from_text(message.to_nota()?);
-        actor.deliver(&prompt)
+        let outcome = DeliveryGate::from_environment().deliver(actor, &prompt)?;
+        if outcome.deferred_delivery() {
+            self.defer(message)?;
+        }
+        Ok(outcome)
+    }
+
+    pub fn defer(&self, message: &Message) -> Result<()> {
+        std::fs::create_dir_all(self.path.root())?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.path.pending_log())?;
+        let mut line = message.to_nota()?;
+        line.push('\n');
+        file.write_all(line.as_bytes())?;
+        Ok(())
     }
 
     pub fn messages(&self) -> Result<Vec<Message>> {
@@ -151,6 +171,35 @@ impl MessageStore {
             .collect())
     }
 
+    pub fn pending(&self) -> Result<Vec<Message>> {
+        self.read_messages_from(self.path.pending_log())
+    }
+
+    pub fn flush(&self) -> Result<FlushReport> {
+        let pending = self.pending()?;
+        let mut delivered = 0;
+        let mut deferred = Vec::new();
+        for message in pending {
+            let actors = self.actors()?;
+            let Some(actor) = actors.actor(&message.to) else {
+                deferred.push(message);
+                continue;
+            };
+            let prompt = TerminalPrompt::from_text(message.to_nota()?);
+            let outcome = DeliveryGate::from_environment().deliver(actor, &prompt)?;
+            if outcome.delivered_to_terminal() {
+                delivered += 1;
+            } else {
+                deferred.push(message);
+            }
+        }
+        self.replace_pending(&deferred)?;
+        Ok(FlushReport {
+            delivered,
+            deferred,
+        })
+    }
+
     pub fn tail(&self, recipient: &ActorId, mut output: impl Write) -> Result<()> {
         std::fs::create_dir_all(self.path.root())?;
         let path = self.path.message_log();
@@ -186,31 +235,47 @@ impl MessageStore {
             thread::sleep(Duration::from_millis(200));
         }
     }
+
+    fn replace_pending(&self, messages: &[Message]) -> Result<()> {
+        std::fs::create_dir_all(self.path.root())?;
+        let text = messages
+            .iter()
+            .map(Message::to_nota)
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .join("\n");
+        if text.is_empty() {
+            let _ = std::fs::remove_file(self.path.pending_log());
+        } else {
+            std::fs::write(self.path.pending_log(), format!("{text}\n"))?;
+        }
+        Ok(())
+    }
+
+    fn read_messages_from(&self, path: PathBuf) -> Result<Vec<Message>> {
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let mut messages = Vec::new();
+        for (index, line) in text.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let message = Message::from_nota(line).map_err(|source| Error::InvalidStoreLine {
+                path: path.clone(),
+                line: index + 1,
+                source,
+            })?;
+            messages.push(message);
+        }
+        Ok(messages)
+    }
 }
 
-impl Actor {
-    pub fn deliver(&self, prompt: &TerminalPrompt) -> Result<bool> {
-        let Some(endpoint) = &self.endpoint else {
-            return Ok(false);
-        };
-        match endpoint.kind.as_str() {
-            "human" => Ok(false),
-            "pty-socket" => {
-                PtySocket::from_path(&endpoint.target).send_prompt(prompt.as_str())?;
-                Ok(true)
-            }
-            "wezterm-pane" => {
-                let pane_id = endpoint.target.parse().map_err(|_| Error::InvalidPaneId {
-                    got: endpoint.target.clone(),
-                })?;
-                let mux = match &endpoint.aux {
-                    Some(socket) => WezTermMux::from_environment().with_socket(socket),
-                    None => WezTermMux::from_environment(),
-                };
-                mux.pane(pane_id).deliver(&prompt)?;
-                Ok(true)
-            }
-            _ => Ok(false),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlushReport {
+    pub delivered: usize,
+    pub deferred: Vec<Message>,
 }

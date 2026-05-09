@@ -13,6 +13,9 @@ pub enum Error {
     #[error("terminal: {0}")]
     Terminal(#[from] persona_wezterm::Error),
 
+    #[error("system: {0}")]
+    System(#[from] persona_system::PersonaSystemError),
+
     #[error("inline Nota argument must be UTF-8: {got:?}")]
     InvalidInlineNotaArgument { got: String },
 
@@ -50,6 +53,9 @@ pub enum Error {
 
     #[error("wezterm pane id {got:?} is invalid")]
     InvalidPaneId { got: String },
+
+    #[error("niri window target {got:?} is invalid")]
+    InvalidNiriWindowTarget { got: String },
 
     #[error("daemon socket is not configured")]
     MissingDaemonSocket,

@@ -21,6 +21,7 @@ path = "src/bin/message-daemon.rs"
 
 [dependencies]
 nota-codec      = { path = "../nota-codec" }
+persona-system  = { path = "../persona-system" }
 persona-wezterm = { path = "../persona-wezterm" }
 rkyv            = "0.8"
 thiserror       = "2"

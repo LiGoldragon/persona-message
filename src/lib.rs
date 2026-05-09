@@ -1,5 +1,6 @@
 pub mod command;
 pub mod daemon;
+pub mod delivery;
 pub mod error;
 pub mod resolver;
 pub mod schema;

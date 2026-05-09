@@ -1,4 +1,5 @@
 use persona_message::command::{CommandLine, Input};
+use persona_message::delivery::PromptState;
 use persona_message::resolver::{ActorIndex, ProcessAncestry};
 use persona_message::schema::{
     Actor, ActorId, EndpointKind, EndpointTransport, Message, MessageIdKind,
@@ -96,6 +97,24 @@ fn human_endpoint_does_not_inject_terminal_input() {
     let delivered = actor.deliver(&prompt).expect("human endpoint is accepted");
 
     assert!(!delivered);
+}
+
+#[test]
+fn prompt_state_reads_cursor_line_before_cursor() {
+    let state = PromptState::from_cursor_line("> human draft", 13);
+
+    assert_eq!(
+        state,
+        PromptState::Occupied {
+            preview: "human draft".to_string()
+        }
+    );
+}
+
+#[test]
+fn prompt_state_accepts_empty_prompt_prefixes() {
+    assert_eq!(PromptState::from_cursor_line("> ", 2), PromptState::Empty);
+    assert_eq!(PromptState::from_cursor_line("› ", 2), PromptState::Empty);
 }
 
 #[test]

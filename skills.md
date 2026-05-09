@@ -17,6 +17,9 @@ Rules for work here:
   non-interactive `claude --print` or `codex exec` checks.
 - Use `scripts/test-pty-pi-niri-focus` when validating `persona-system` focus
   observations against actual visible Pi harness windows.
+- Use `scripts/test-pty-pi-guarded-delivery` when validating that terminal
+  delivery defers while a target harness window is focused and delivers only
+  after focus moves to a neutral window.
 - Treat the local ledger as transitional development state. Do not deepen it
   into the final database surface.
 
