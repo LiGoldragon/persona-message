@@ -14,7 +14,7 @@ pub enum Error {
     Terminal(#[from] persona_wezterm::Error),
 
     #[error("system: {0}")]
-    System(#[from] persona_system::PersonaSystemError),
+    System(#[from] persona_system::Error),
 
     #[error("inline Nota argument must be UTF-8: {got:?}")]
     InvalidInlineNotaArgument { got: String },

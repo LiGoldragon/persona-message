@@ -112,11 +112,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1778329867,
-        "narHash": "sha256-2j1VUxjXAzOiAT0nyTjOqAHAtTZH/ej7FlAYcumAMfI=",
+        "lastModified": 1778334387,
+        "narHash": "sha256-1wQsVsGfWWn/bp9ihm4oioZYXfHhzvwwYEZOLtJV1mY=",
         "owner": "LiGoldragon",
         "repo": "persona-system",
-        "rev": "ebfc1e84d724f7036a33aae780a49787b9f4355e",
+        "rev": "eafb99601b2bb459e3347407787bb861f40b0389",
         "type": "github"
       },
       "original": {
