@@ -75,6 +75,6 @@ through pushed observations.
 
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through typed frames in
-`signal-persona`, durable commits through `persona-sema` and its store actor,
-and delivery policy in `persona-router`, with NOTA kept at the human and
-harness projection boundaries.
+`signal-persona`, durable component state lives in component-owned Sema
+databases through `persona-sema`, and delivery policy in `persona-router`, with
+NOTA kept at the human and harness projection boundaries.
