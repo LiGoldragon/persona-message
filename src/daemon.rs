@@ -8,6 +8,9 @@ use kameo::message::{Context, Message};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
+use crate::actors::message_store::{
+    ExecuteStoreEnvelope, MessageStoreActor, ReadStoreActorRequestCount,
+};
 use crate::command::{Accepted, InboxMessages, Input, KnownActors, Output, Registered};
 use crate::error::{Error, Result};
 use crate::resolver::ProcessAncestry;
@@ -77,7 +80,7 @@ impl MessageDaemon {
 
 #[derive(Debug)]
 pub struct MessageDaemonActor {
-    store: MessageStore,
+    store_actor: ActorRef<MessageStoreActor>,
     executed_request_count: u64,
     emitted_response_count: u64,
 }
@@ -103,6 +106,30 @@ impl MessageDaemonActorHandle {
             })
     }
 
+    pub async fn executed_request_count(
+        &self,
+        probe: ActorRequestCountProbe,
+    ) -> Result<ActorRequestCount> {
+        self.actor_reference
+            .ask(ReadDaemonActorRequestCount { probe })
+            .await
+            .map_err(|error| Error::ActorCall {
+                detail: error.to_string(),
+            })
+    }
+
+    pub async fn store_executed_request_count(
+        &self,
+        probe: ActorRequestCountProbe,
+    ) -> Result<ActorRequestCount> {
+        self.actor_reference
+            .ask(ReadStoreRequestCount { probe })
+            .await
+            .map_err(|error| Error::ActorCall {
+                detail: error.to_string(),
+            })
+    }
+
     pub async fn stop(self) -> Result<()> {
         self.actor_reference
             .stop_gracefully()
@@ -120,16 +147,63 @@ pub struct ExecuteDaemonEnvelope {
     pub envelope: DaemonEnvelope,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActorRequestCountProbe {
+    minimum_expected: u64,
+}
+
+impl ActorRequestCountProbe {
+    pub fn expecting_at_least(minimum_expected: u64) -> Self {
+        Self { minimum_expected }
+    }
+
+    pub fn inspect(self, observed: u64) -> ActorRequestCount {
+        ActorRequestCount {
+            observed,
+            minimum_expected: self.minimum_expected,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, kameo::Reply)]
+pub struct ActorRequestCount {
+    observed: u64,
+    minimum_expected: u64,
+}
+
+impl ActorRequestCount {
+    pub fn observed(&self) -> u64 {
+        self.observed
+    }
+
+    pub fn satisfied(&self) -> bool {
+        self.observed >= self.minimum_expected
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadDaemonActorRequestCount {
+    pub probe: ActorRequestCountProbe,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadStoreRequestCount {
+    pub probe: ActorRequestCountProbe,
+}
+
 impl Actor for MessageDaemonActor {
     type Args = MessageStore;
     type Error = Infallible;
 
     async fn on_start(
         store: Self::Args,
-        _actor_reference: ActorRef<Self>,
+        actor_reference: ActorRef<Self>,
     ) -> std::result::Result<Self, Self::Error> {
+        let store_actor = MessageStoreActor::supervise(&actor_reference, store)
+            .spawn()
+            .await;
         Ok(Self {
-            store,
+            store_actor,
             executed_request_count: 0,
             emitted_response_count: 0,
         })
@@ -147,9 +221,48 @@ impl Message<ExecuteDaemonEnvelope> for MessageDaemonActor {
         if matches!(message.envelope, DaemonEnvelope::Request(_)) {
             self.executed_request_count = self.executed_request_count.saturating_add(1);
         }
-        let response = message.envelope.execute(&self.store)?;
+        let response = self
+            .store_actor
+            .ask(ExecuteStoreEnvelope {
+                envelope: message.envelope,
+            })
+            .await
+            .map_err(|error| Error::ActorCall {
+                detail: error.to_string(),
+            })?;
         self.emitted_response_count = self.emitted_response_count.saturating_add(1);
         Ok(response)
+    }
+}
+
+impl Message<ReadDaemonActorRequestCount> for MessageDaemonActor {
+    type Reply = ActorRequestCount;
+
+    async fn handle(
+        &mut self,
+        message: ReadDaemonActorRequestCount,
+        _context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        message.probe.inspect(self.executed_request_count)
+    }
+}
+
+impl Message<ReadStoreRequestCount> for MessageDaemonActor {
+    type Reply = Result<ActorRequestCount>;
+
+    async fn handle(
+        &mut self,
+        message: ReadStoreRequestCount,
+        _context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.store_actor
+            .ask(ReadStoreActorRequestCount {
+                probe: message.probe,
+            })
+            .await
+            .map_err(|error| Error::ActorCall {
+                detail: error.to_string(),
+            })
     }
 }
 

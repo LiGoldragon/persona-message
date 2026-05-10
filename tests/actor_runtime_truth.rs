@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use persona_message::command::{Agents, Input, Output};
-use persona_message::daemon::{DaemonEnvelope, DaemonRequest, MessageDaemonActorHandle};
+use persona_message::daemon::{
+    ActorRequestCountProbe, DaemonEnvelope, DaemonRequest, MessageDaemonActorHandle,
+};
 use persona_message::schema::{Actor, ActorId};
 use persona_message::store::{MessageStore, StorePath};
 
@@ -111,16 +113,68 @@ fn message_daemon_cannot_bypass_actor_mailbox() {
 
 #[test]
 fn message_daemon_actor_cannot_be_empty_marker() {
+    let daemon_source = SourceFile::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("daemon.rs"),
+    );
+    let store_source = SourceFile::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("actors")
+            .join("message_store.rs"),
+    );
+
+    assert!(daemon_source.contains("pub struct MessageDaemonActor {"));
+    assert!(daemon_source.contains("store_actor: ActorRef<MessageStoreActor>,"));
+    assert!(daemon_source.contains("executed_request_count: u64,"));
+    assert!(daemon_source.contains("emitted_response_count: u64,"));
+    assert!(store_source.contains("pub struct MessageStoreActor {"));
+    assert!(store_source.contains("store: MessageStore,"));
+    assert!(store_source.contains("executed_request_count: u64,"));
+}
+
+#[test]
+fn message_store_mutation_cannot_skip_child_actor() {
     let source = SourceFile::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
             .join("daemon.rs"),
     );
 
-    assert!(source.contains("pub struct MessageDaemonActor {"));
-    assert!(source.contains("store: MessageStore,"));
-    assert!(source.contains("executed_request_count: u64,"));
-    assert!(source.contains("emitted_response_count: u64,"));
+    assert!(source.contains("MessageStoreActor::supervise(&actor_reference, store)"));
+    assert!(source.contains(".ask(ExecuteStoreEnvelope"));
+    assert!(!source.contains("message.envelope.execute(&self.store)"));
+}
+
+#[test]
+fn message_actor_messages_cannot_be_empty_markers() {
+    let forbidden_empty_markers = [
+        "pub struct ReadDaemonActorRequestCount;",
+        "pub struct ReadStoreRequestCount;",
+        "pub struct ReadStoreActorRequestCount;",
+        "struct ReadDaemonActorRequestCount;",
+        "struct ReadStoreRequestCount;",
+        "struct ReadStoreActorRequestCount;",
+    ];
+
+    let mut violations = Vec::new();
+    for file in SourceTree::new().guarded_files() {
+        if file.is_guard_source() {
+            continue;
+        }
+        for marker in forbidden_empty_markers {
+            if file.contains(marker) {
+                violations.push(format!("{} contains {marker}", file.path.display()));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "empty actor-message marker violations:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[tokio::test]
@@ -155,5 +209,19 @@ async fn message_daemon_actor_cannot_skip_known_actor_state() {
         }
         other => panic!("expected known actors response, got {other:?}"),
     }
+    let daemon_count = daemon
+        .executed_request_count(ActorRequestCountProbe::expecting_at_least(1))
+        .await
+        .expect("daemon actor count reads through typed message");
+    let store_count = daemon
+        .store_executed_request_count(ActorRequestCountProbe::expecting_at_least(1))
+        .await
+        .expect("store actor count reads through typed message");
+
+    assert_eq!(daemon_count.observed(), 1);
+    assert_eq!(store_count.observed(), 1);
+    assert!(daemon_count.satisfied());
+    assert!(store_count.satisfied());
+
     daemon.stop().await.expect("daemon actor stops");
 }

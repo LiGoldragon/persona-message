@@ -14,7 +14,10 @@ Rules for work here:
 - Keep stateful harness workflows named under `scripts/` and exposed by
   `flake.nix`.
 - Keep daemon request execution inside the Kameo `MessageDaemonActor`; client
-  streams may decode frames, but store mutations belong behind that mailbox.
+  streams may decode frames, but store mutations belong behind that mailbox and
+  then behind the supervised `MessageStoreActor` child.
+- Do not add empty marker actor messages. Runtime inspection and actor-path
+  witnesses carry data describing what is being inspected.
 - Keep real harness tests interactive and persistent. Do not replace them with
   non-interactive `claude --print` or `codex exec` checks.
 - Use `scripts/test-pty-pi-niri-focus` when validating `persona-system` focus

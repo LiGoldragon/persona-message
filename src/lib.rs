@@ -1,3 +1,4 @@
+pub mod actors;
 pub mod command;
 pub mod daemon;
 pub mod delivery;

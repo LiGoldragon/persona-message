@@ -34,6 +34,8 @@ flowchart LR
 - `message-daemon` as the transitional daemon surface;
 - a Kameo `MessageDaemonActor` that owns daemon request execution against the
   transitional ledger;
+- a supervised Kameo `MessageStoreActor` child that owns transitional ledger
+  reads and writes behind the daemon actor;
 - local actor resolution from process ancestry;
 - actor registration and listing through `Register` and `Agents`;
 - local append/read surfaces for message tests;
@@ -43,9 +45,10 @@ flowchart LR
 
 The current local ledger is development state. It keeps harness-to-harness tests
 usable before `persona-router` fully owns delivery and router-scoped durable
-commits. While the daemon is running, ledger mutations enter through
-`MessageDaemonActor` so concurrent clients share a single mailbox-backed state
-owner.
+commits. While the daemon is running, client requests enter through
+`MessageDaemonActor`. Ledger reads and writes then cross into the supervised
+`MessageStoreActor`, so the root actor coordinates daemon requests and the
+store actor owns the mutation plane.
 
 In the assembled runtime:
 
@@ -78,8 +81,10 @@ This repo does not own:
 - Agents register their local process identity before sending; ad hoc
   `actors.nota` edits are a fallback for debugging, not the normal path.
 - NOTA input is decoded into typed Rust before it affects state.
-- Daemon requests touch the transitional ledger only through the Kameo daemon
-  actor mailbox.
+- Daemon requests touch the transitional ledger only through Kameo actor
+  mailboxes: daemon root first, supervised store actor second.
+- Kameo actor messages are data-bearing; empty marker messages are forbidden
+  for actor-path tests and runtime inspection.
 - Harness tests target interactive persistent harnesses, not non-interactive
   provider commands.
 - Repeated debug commands become named scripts and Nix apps.
@@ -90,10 +95,11 @@ This repo does not own:
 ```text
 src/main.rs            message CLI entry
 src/bin/message-daemon.rs
+src/actors/            Kameo actor planes
 src/schema.rs          NOTA-facing records
 src/resolver.rs        process ancestry sender resolution
 src/store.rs           transitional local ledger
-src/daemon.rs          transitional daemon surface and Kameo daemon actor
+src/daemon.rs          transitional daemon surface and daemon root actor
 scripts/               repeatable stateful harness workflows
 tests/                 CLI, daemon, actor-runtime, two-process, and harness tests
 ```
