@@ -13,10 +13,10 @@ Rules for work here:
   Hand-edit `actors.nota` only when debugging the resolver itself.
 - Keep stateful harness workflows named under `scripts/` and exposed by
   `flake.nix`.
-- Keep daemon request execution inside the Kameo `MessageDaemonActor`; client
-  streams may decode frames, but store mutations belong behind that mailbox and
-  then behind the supervised `MessageStoreActor` child.
-- Do not add empty marker actor messages. Runtime inspection and actor-path
+- Keep daemon request intake inside the Kameo `DaemonRoot`; client streams may
+  decode frames, but store mutations belong behind that mailbox and then behind
+  the supervised `Ledger` child.
+- Do not add empty marker Kameo messages. Runtime inspection and mailbox-path
   witnesses carry data describing what is being inspected.
 - Keep real harness tests interactive and persistent. Do not replace them with
   non-interactive `claude --print` or `codex exec` checks.

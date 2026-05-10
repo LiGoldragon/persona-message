@@ -3,15 +3,15 @@ use kameo::error::Infallible;
 use kameo::message::{Context, Message};
 
 use crate::Result;
-use crate::daemon::{ActorRequestCount, ActorRequestCountProbe, DaemonEnvelope};
+use crate::daemon::{DaemonEnvelope, RequestCount, RequestCountProbe};
 use crate::store::MessageStore;
 
-pub struct MessageStoreActor {
+pub struct Ledger {
     store: MessageStore,
     executed_request_count: u64,
 }
 
-impl MessageStoreActor {
+impl Ledger {
     fn new(store: MessageStore) -> Self {
         Self {
             store,
@@ -31,7 +31,7 @@ impl MessageStoreActor {
     }
 }
 
-impl Actor for MessageStoreActor {
+impl Actor for Ledger {
     type Args = MessageStore;
     type Error = Infallible;
 
@@ -43,32 +43,32 @@ impl Actor for MessageStoreActor {
     }
 }
 
-pub struct ExecuteStoreEnvelope {
+pub struct ExecuteEnvelope {
     pub envelope: DaemonEnvelope,
 }
 
-impl Message<ExecuteStoreEnvelope> for MessageStoreActor {
+impl Message<ExecuteEnvelope> for Ledger {
     type Reply = Result<DaemonEnvelope>;
 
     async fn handle(
         &mut self,
-        message: ExecuteStoreEnvelope,
+        message: ExecuteEnvelope,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.execute_envelope(message.envelope)
     }
 }
 
-pub struct ReadStoreActorRequestCount {
-    pub probe: ActorRequestCountProbe,
+pub struct ReadRequestCount {
+    pub probe: RequestCountProbe,
 }
 
-impl Message<ReadStoreActorRequestCount> for MessageStoreActor {
-    type Reply = ActorRequestCount;
+impl Message<ReadRequestCount> for Ledger {
+    type Reply = RequestCount;
 
     async fn handle(
         &mut self,
-        message: ReadStoreActorRequestCount,
+        message: ReadRequestCount,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         message.probe.inspect(self.request_count())

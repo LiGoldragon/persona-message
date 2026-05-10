@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use persona_message::command::{Agents, Input, Output};
 use persona_message::daemon::{
-    ActorRequestCountProbe, DaemonEnvelope, DaemonRequest, MessageDaemonActorHandle,
+    DaemonEnvelope, DaemonRequest, DaemonRoot, ExecuteEnvelope, ReadLedgerRequestCount,
+    ReadRootRequestCount, RequestCountProbe,
 };
 use persona_message::schema::{Actor, ActorId};
 use persona_message::store::{MessageStore, StorePath};
@@ -50,26 +51,32 @@ impl SourceTree {
     }
 
     fn source_files(&self) -> Vec<PathBuf> {
-        let src = self.root.join("src");
-        fs::read_dir(src)
-            .expect("source directory is readable")
-            .map(|entry| entry.expect("source entry is readable").path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
-            .collect()
+        self.rust_files_below(self.root.join("src"))
     }
 
     fn test_files(&self) -> Vec<PathBuf> {
-        let tests = self.root.join("tests");
-        fs::read_dir(tests)
-            .expect("tests directory is readable")
-            .map(|entry| entry.expect("test entry is readable").path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
-            .collect()
+        self.rust_files_below(self.root.join("tests"))
+    }
+
+    fn rust_files_below(&self, root: PathBuf) -> Vec<PathBuf> {
+        let mut pending = vec![root];
+        let mut files = Vec::new();
+        while let Some(path) = pending.pop() {
+            for entry in fs::read_dir(path).expect("source directory is readable") {
+                let path = entry.expect("source entry is readable").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    files.push(path);
+                }
+            }
+        }
+        files
     }
 }
 
 #[test]
-fn message_daemon_actor_cannot_use_non_kameo_runtime() {
+fn daemon_runtime_cannot_use_non_kameo_runtime() {
     let forbidden_fragments = [
         "ractor =",
         "name = \"ractor\"",
@@ -93,7 +100,7 @@ fn message_daemon_actor_cannot_use_non_kameo_runtime() {
 
     assert!(
         violations.is_empty(),
-        "non-kameo daemon actor runtime violations:\n{}",
+        "non-kameo daemon runtime violations:\n{}",
         violations.join("\n")
     );
 }
@@ -106,79 +113,82 @@ fn message_daemon_cannot_bypass_actor_mailbox() {
             .join("daemon.rs"),
     );
 
-    assert!(source.contains("MessageDaemonActorHandle::start"));
-    assert!(source.contains("actor.execute(envelope)"));
+    assert!(source.contains("DaemonRoot::start"));
+    assert!(source.contains("actor.ask(ExecuteEnvelope"));
     assert!(!source.contains("let response = envelope.execute(&self.store)"));
 }
 
 #[test]
-fn message_daemon_actor_cannot_be_empty_marker() {
+fn daemon_and_ledger_cannot_be_empty_markers() {
     let daemon_source = SourceFile::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
             .join("daemon.rs"),
     );
-    let store_source = SourceFile::read(
+    let ledger_source = SourceFile::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
             .join("actors")
-            .join("message_store.rs"),
+            .join("ledger.rs"),
     );
 
-    assert!(daemon_source.contains("pub struct MessageDaemonActor {"));
-    assert!(daemon_source.contains("store_actor: ActorRef<MessageStoreActor>,"));
+    assert!(daemon_source.contains("pub struct DaemonRoot {"));
+    assert!(daemon_source.contains("ledger: ActorRef<ledger::Ledger>,"));
     assert!(daemon_source.contains("executed_request_count: u64,"));
     assert!(daemon_source.contains("emitted_response_count: u64,"));
-    assert!(store_source.contains("pub struct MessageStoreActor {"));
-    assert!(store_source.contains("store: MessageStore,"));
-    assert!(store_source.contains("executed_request_count: u64,"));
+    assert!(ledger_source.contains("pub struct Ledger {"));
+    assert!(ledger_source.contains("store: MessageStore,"));
+    assert!(ledger_source.contains("executed_request_count: u64,"));
 }
 
 #[test]
-fn message_store_mutation_cannot_skip_child_actor() {
+fn message_store_mutation_cannot_skip_ledger() {
     let source = SourceFile::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
             .join("daemon.rs"),
     );
 
-    assert!(source.contains("MessageStoreActor::supervise(&actor_reference, store)"));
-    assert!(source.contains(".ask(ExecuteStoreEnvelope"));
+    assert!(source.contains("ledger::Ledger::supervise(&actor_reference, store)"));
+    assert!(source.contains(".ask(ledger::ExecuteEnvelope"));
     assert!(!source.contains("message.envelope.execute(&self.store)"));
 }
 
 #[test]
-fn message_actor_messages_cannot_be_empty_markers() {
-    let forbidden_empty_markers = [
-        "pub struct ReadDaemonActorRequestCount;",
-        "pub struct ReadStoreRequestCount;",
-        "pub struct ReadStoreActorRequestCount;",
-        "struct ReadDaemonActorRequestCount;",
-        "struct ReadStoreRequestCount;",
-        "struct ReadStoreActorRequestCount;",
-    ];
-
+fn runtime_messages_cannot_be_empty_markers() {
     let mut violations = Vec::new();
-    for file in SourceTree::new().guarded_files() {
+    for file in SourceTree::new()
+        .source_files()
+        .into_iter()
+        .map(SourceFile::read)
+    {
         if file.is_guard_source() {
             continue;
         }
-        for marker in forbidden_empty_markers {
-            if file.contains(marker) {
-                violations.push(format!("{} contains {marker}", file.path.display()));
+        for (line_index, line) in file.content.lines().enumerate() {
+            let trimmed = line.trim();
+            let is_struct_marker =
+                trimmed.starts_with("pub struct ") || trimmed.starts_with("struct ");
+            if is_struct_marker && trimmed.ends_with(';') && !trimmed.contains('(') {
+                violations.push(format!(
+                    "{}:{} declares empty marker {}",
+                    file.path.display(),
+                    line_index + 1,
+                    trimmed
+                ));
             }
         }
     }
 
     assert!(
         violations.is_empty(),
-        "empty actor-message marker violations:\n{}",
+        "empty runtime-message marker violations:\n{}",
         violations.join("\n")
     );
 }
 
 #[tokio::test]
-async fn message_daemon_actor_cannot_skip_known_actor_state() {
+async fn message_daemon_cannot_skip_known_ledger_state() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let store = MessageStore::from_path(StorePath::from_path(directory.path()));
     let actor = Actor {
@@ -192,13 +202,15 @@ async fn message_daemon_actor_cannot_skip_known_actor_state() {
         format!("{}\n", actor.to_nota().expect("actor encodes")),
     )
     .expect("actor index writes");
-    let daemon = MessageDaemonActorHandle::start(store).await;
+    let daemon = DaemonRoot::start(store).await;
 
     let response = daemon
-        .execute(DaemonEnvelope::Request(DaemonRequest::from_input(
-            std::process::id(),
-            Input::Agents(Agents {}),
-        )))
+        .ask(ExecuteEnvelope {
+            envelope: DaemonEnvelope::Request(DaemonRequest::from_input(
+                std::process::id(),
+                Input::Agents(Agents {}),
+            )),
+        })
         .await
         .expect("daemon actor executes request");
 
@@ -210,11 +222,15 @@ async fn message_daemon_actor_cannot_skip_known_actor_state() {
         other => panic!("expected known actors response, got {other:?}"),
     }
     let daemon_count = daemon
-        .executed_request_count(ActorRequestCountProbe::expecting_at_least(1))
+        .ask(ReadRootRequestCount {
+            probe: RequestCountProbe::expecting_at_least(1),
+        })
         .await
         .expect("daemon actor count reads through typed message");
     let store_count = daemon
-        .store_executed_request_count(ActorRequestCountProbe::expecting_at_least(1))
+        .ask(ReadLedgerRequestCount {
+            probe: RequestCountProbe::expecting_at_least(1),
+        })
         .await
         .expect("store actor count reads through typed message");
 
@@ -223,5 +239,6 @@ async fn message_daemon_actor_cannot_skip_known_actor_state() {
     assert!(daemon_count.satisfied());
     assert!(store_count.satisfied());
 
-    daemon.stop().await.expect("daemon actor stops");
+    daemon.stop_gracefully().await.expect("daemon actor stops");
+    daemon.wait_for_shutdown().await;
 }

@@ -20,8 +20,9 @@ flowchart LR
     "human or harness" -->|"NOTA Send"| "message CLI"
     "message CLI" -->|"Register"| "actors.nota"
     "actors.nota" -->|"process ancestry"| "message CLI"
-    "message CLI" -->|"typed validation"| "MessageDaemonActor"
-    "MessageDaemonActor" -->|"serialized store writes"| "local message ledger"
+    "message CLI" -->|"typed validation"| "DaemonRoot"
+    "DaemonRoot" -->|"store intent"| "Ledger"
+    "Ledger" -->|"serialized writes"| "local message ledger"
     "message CLI" -->|"Frame request"| "signal-persona-message"
     "persona-router" -->|"pre-harness NOTA projection"| "message CLI"
 ```
@@ -32,10 +33,9 @@ flowchart LR
 
 - `message` CLI for NOTA input/output;
 - `message-daemon` as the transitional daemon surface;
-- a Kameo `MessageDaemonActor` that owns daemon request execution against the
-  transitional ledger;
-- a supervised Kameo `MessageStoreActor` child that owns transitional ledger
-  reads and writes behind the daemon actor;
+- a Kameo `DaemonRoot` that owns daemon request intake;
+- a supervised Kameo `Ledger` child that owns transitional ledger reads and
+  writes behind the root;
 - local actor resolution from process ancestry;
 - actor registration and listing through `Register` and `Agents`;
 - local append/read surfaces for message tests;
@@ -46,9 +46,8 @@ flowchart LR
 The current local ledger is development state. It keeps harness-to-harness tests
 usable before `persona-router` fully owns delivery and router-scoped durable
 commits. While the daemon is running, client requests enter through
-`MessageDaemonActor`. Ledger reads and writes then cross into the supervised
-`MessageStoreActor`, so the root actor coordinates daemon requests and the
-store actor owns the mutation plane.
+`DaemonRoot`. Ledger reads and writes then cross into the supervised `Ledger`,
+so the root coordinates daemon requests and the ledger owns the mutation plane.
 
 In the assembled runtime:
 
@@ -81,10 +80,10 @@ This repo does not own:
 - Agents register their local process identity before sending; ad hoc
   `actors.nota` edits are a fallback for debugging, not the normal path.
 - NOTA input is decoded into typed Rust before it affects state.
-- Daemon requests touch the transitional ledger only through Kameo actor
-  mailboxes: daemon root first, supervised store actor second.
-- Kameo actor messages are data-bearing; empty marker messages are forbidden
-  for actor-path tests and runtime inspection.
+- Daemon requests touch the transitional ledger only through Kameo mailboxes:
+  `DaemonRoot` first, supervised `Ledger` second.
+- Kameo messages are data-bearing; empty marker messages are forbidden for
+  runtime-path tests and inspection.
 - Harness tests target interactive persistent harnesses, not non-interactive
   provider commands.
 - Repeated debug commands become named scripts and Nix apps.

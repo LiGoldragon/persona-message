@@ -8,9 +8,7 @@ use kameo::message::{Context, Message};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
-use crate::actors::message_store::{
-    ExecuteStoreEnvelope, MessageStoreActor, ReadStoreActorRequestCount,
-};
+use crate::actors::ledger;
 use crate::command::{Accepted, InboxMessages, Input, KnownActors, Output, Registered};
 use crate::error::{Error, Result};
 use crate::resolver::ProcessAncestry;
@@ -54,7 +52,7 @@ impl MessageDaemon {
         let _ = std::fs::remove_file(self.socket.path());
         let listener = UnixListener::bind(self.socket.path())?;
         let runtime = tokio::runtime::Runtime::new()?;
-        let actor = runtime.block_on(MessageDaemonActorHandle::start(self.store.clone()));
+        let actor = runtime.block_on(DaemonRoot::start(self.store.clone()));
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => Self::handle_stream(&runtime, &actor, stream),
@@ -67,11 +65,15 @@ impl MessageDaemon {
 
     fn handle_stream(
         runtime: &tokio::runtime::Runtime,
-        actor: &MessageDaemonActorHandle,
+        actor: &ActorRef<DaemonRoot>,
         stream: UnixStream,
     ) -> Result<()> {
         let envelope = DaemonFrame::from_stream(&stream)?.decode()?;
-        let response = runtime.block_on(actor.execute(envelope))?;
+        let response = runtime
+            .block_on(actor.ask(ExecuteEnvelope { envelope }).send())
+            .map_err(|error| Error::ActorCall {
+                detail: error.to_string(),
+            })?;
         let mut writer = stream;
         DaemonFrame::from_envelope(&response)?.write_to(&mut writer)?;
         Ok(())
@@ -79,86 +81,37 @@ impl MessageDaemon {
 }
 
 #[derive(Debug)]
-pub struct MessageDaemonActor {
-    store_actor: ActorRef<MessageStoreActor>,
+pub struct DaemonRoot {
+    ledger: ActorRef<ledger::Ledger>,
     executed_request_count: u64,
     emitted_response_count: u64,
 }
 
-#[derive(Debug, Clone)]
-pub struct MessageDaemonActorHandle {
-    actor_reference: ActorRef<MessageDaemonActor>,
-}
-
-impl MessageDaemonActorHandle {
-    pub async fn start(store: MessageStore) -> Self {
-        let actor_reference = MessageDaemonActor::spawn(store);
+impl DaemonRoot {
+    pub async fn start(store: MessageStore) -> ActorRef<Self> {
+        let actor_reference = Self::spawn(store);
         actor_reference.wait_for_startup().await;
-        Self { actor_reference }
-    }
-
-    pub async fn execute(&self, envelope: DaemonEnvelope) -> Result<DaemonEnvelope> {
-        self.actor_reference
-            .ask(ExecuteDaemonEnvelope { envelope })
-            .await
-            .map_err(|error| Error::ActorCall {
-                detail: error.to_string(),
-            })
-    }
-
-    pub async fn executed_request_count(
-        &self,
-        probe: ActorRequestCountProbe,
-    ) -> Result<ActorRequestCount> {
-        self.actor_reference
-            .ask(ReadDaemonActorRequestCount { probe })
-            .await
-            .map_err(|error| Error::ActorCall {
-                detail: error.to_string(),
-            })
-    }
-
-    pub async fn store_executed_request_count(
-        &self,
-        probe: ActorRequestCountProbe,
-    ) -> Result<ActorRequestCount> {
-        self.actor_reference
-            .ask(ReadStoreRequestCount { probe })
-            .await
-            .map_err(|error| Error::ActorCall {
-                detail: error.to_string(),
-            })
-    }
-
-    pub async fn stop(self) -> Result<()> {
-        self.actor_reference
-            .stop_gracefully()
-            .await
-            .map_err(|error| Error::ActorCall {
-                detail: error.to_string(),
-            })?;
-        self.actor_reference.wait_for_shutdown().await;
-        Ok(())
+        actor_reference
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecuteDaemonEnvelope {
+pub struct ExecuteEnvelope {
     pub envelope: DaemonEnvelope,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ActorRequestCountProbe {
+pub struct RequestCountProbe {
     minimum_expected: u64,
 }
 
-impl ActorRequestCountProbe {
+impl RequestCountProbe {
     pub fn expecting_at_least(minimum_expected: u64) -> Self {
         Self { minimum_expected }
     }
 
-    pub fn inspect(self, observed: u64) -> ActorRequestCount {
-        ActorRequestCount {
+    pub fn inspect(self, observed: u64) -> RequestCount {
+        RequestCount {
             observed,
             minimum_expected: self.minimum_expected,
         }
@@ -166,12 +119,12 @@ impl ActorRequestCountProbe {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, kameo::Reply)]
-pub struct ActorRequestCount {
+pub struct RequestCount {
     observed: u64,
     minimum_expected: u64,
 }
 
-impl ActorRequestCount {
+impl RequestCount {
     pub fn observed(&self) -> u64 {
         self.observed
     }
@@ -182,16 +135,16 @@ impl ActorRequestCount {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReadDaemonActorRequestCount {
-    pub probe: ActorRequestCountProbe,
+pub struct ReadRootRequestCount {
+    pub probe: RequestCountProbe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReadStoreRequestCount {
-    pub probe: ActorRequestCountProbe,
+pub struct ReadLedgerRequestCount {
+    pub probe: RequestCountProbe,
 }
 
-impl Actor for MessageDaemonActor {
+impl Actor for DaemonRoot {
     type Args = MessageStore;
     type Error = Infallible;
 
@@ -199,31 +152,31 @@ impl Actor for MessageDaemonActor {
         store: Self::Args,
         actor_reference: ActorRef<Self>,
     ) -> std::result::Result<Self, Self::Error> {
-        let store_actor = MessageStoreActor::supervise(&actor_reference, store)
+        let ledger = ledger::Ledger::supervise(&actor_reference, store)
             .spawn()
             .await;
         Ok(Self {
-            store_actor,
+            ledger,
             executed_request_count: 0,
             emitted_response_count: 0,
         })
     }
 }
 
-impl Message<ExecuteDaemonEnvelope> for MessageDaemonActor {
+impl Message<ExecuteEnvelope> for DaemonRoot {
     type Reply = Result<DaemonEnvelope>;
 
     async fn handle(
         &mut self,
-        message: ExecuteDaemonEnvelope,
+        message: ExecuteEnvelope,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         if matches!(message.envelope, DaemonEnvelope::Request(_)) {
             self.executed_request_count = self.executed_request_count.saturating_add(1);
         }
         let response = self
-            .store_actor
-            .ask(ExecuteStoreEnvelope {
+            .ledger
+            .ask(ledger::ExecuteEnvelope {
                 envelope: message.envelope,
             })
             .await
@@ -235,28 +188,28 @@ impl Message<ExecuteDaemonEnvelope> for MessageDaemonActor {
     }
 }
 
-impl Message<ReadDaemonActorRequestCount> for MessageDaemonActor {
-    type Reply = ActorRequestCount;
+impl Message<ReadRootRequestCount> for DaemonRoot {
+    type Reply = RequestCount;
 
     async fn handle(
         &mut self,
-        message: ReadDaemonActorRequestCount,
+        message: ReadRootRequestCount,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         message.probe.inspect(self.executed_request_count)
     }
 }
 
-impl Message<ReadStoreRequestCount> for MessageDaemonActor {
-    type Reply = Result<ActorRequestCount>;
+impl Message<ReadLedgerRequestCount> for DaemonRoot {
+    type Reply = Result<RequestCount>;
 
     async fn handle(
         &mut self,
-        message: ReadStoreRequestCount,
+        message: ReadLedgerRequestCount,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.store_actor
-            .ask(ReadStoreActorRequestCount {
+        self.ledger
+            .ask(ledger::ReadRequestCount {
                 probe: message.probe,
             })
             .await
