@@ -2,7 +2,7 @@
 name         = "persona-message"
 version      = "0.1.0"
 edition      = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/LiGoldragon/persona-message"
 description  = "Persona NOTA message CLI and prototype ledger."
@@ -20,11 +20,13 @@ name = "message-daemon"
 path = "src/bin/message-daemon.rs"
 
 [dependencies]
+kameo           = { version = "0.20", default-features = false, features = ["macros", "tracing"] }
 nota-codec      = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
 persona-system  = { git = "https://github.com/LiGoldragon/persona-system.git", branch = "main" }
 persona-wezterm = { git = "https://github.com/LiGoldragon/persona-wezterm.git", branch = "main" }
 rkyv            = "0.8"
 thiserror       = "2"
+tokio           = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 tempfile = "3"

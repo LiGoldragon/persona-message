@@ -3,6 +3,8 @@
 `persona-message` is Persona's human-facing message CLI and transitional ledger.
 The `message` binary accepts one NOTA input record, decodes it through Rust
 types, and stores canonical `Message` records in a local development ledger.
+When `message-daemon` is used, daemon requests are serialized through a Kameo
+`MessageDaemonActor` before touching that ledger.
 
 The shared binary contract now belongs to `signal-persona`. This repository
 remains useful as the text boundary for harnesses and humans: NOTA in, typed

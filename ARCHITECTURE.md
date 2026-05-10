@@ -20,7 +20,8 @@ flowchart LR
     "human or harness" -->|"NOTA Send"| "message CLI"
     "message CLI" -->|"Register"| "actors.nota"
     "actors.nota" -->|"process ancestry"| "message CLI"
-    "message CLI" -->|"typed validation"| "local message ledger"
+    "message CLI" -->|"typed validation"| "MessageDaemonActor"
+    "MessageDaemonActor" -->|"serialized store writes"| "local message ledger"
     "message CLI" -->|"Frame request"| "signal-persona-message"
     "persona-router" -->|"pre-harness NOTA projection"| "message CLI"
 ```
@@ -31,6 +32,8 @@ flowchart LR
 
 - `message` CLI for NOTA input/output;
 - `message-daemon` as the transitional daemon surface;
+- a Kameo `MessageDaemonActor` that owns daemon request execution against the
+  transitional ledger;
 - local actor resolution from process ancestry;
 - actor registration and listing through `Register` and `Agents`;
 - local append/read surfaces for message tests;
@@ -40,7 +43,9 @@ flowchart LR
 
 The current local ledger is development state. It keeps harness-to-harness tests
 usable before `persona-router` fully owns delivery and router-scoped durable
-commits.
+commits. While the daemon is running, ledger mutations enter through
+`MessageDaemonActor` so concurrent clients share a single mailbox-backed state
+owner.
 
 In the assembled runtime:
 
@@ -73,6 +78,8 @@ This repo does not own:
 - Agents register their local process identity before sending; ad hoc
   `actors.nota` edits are a fallback for debugging, not the normal path.
 - NOTA input is decoded into typed Rust before it affects state.
+- Daemon requests touch the transitional ledger only through the Kameo daemon
+  actor mailbox.
 - Harness tests target interactive persistent harnesses, not non-interactive
   provider commands.
 - Repeated debug commands become named scripts and Nix apps.
@@ -86,9 +93,9 @@ src/bin/message-daemon.rs
 src/schema.rs          NOTA-facing records
 src/resolver.rs        process ancestry sender resolution
 src/store.rs           transitional local ledger
-src/daemon.rs          transitional daemon surface
+src/daemon.rs          transitional daemon surface and Kameo daemon actor
 scripts/               repeatable stateful harness workflows
-tests/                 CLI, daemon, two-process, and harness tests
+tests/                 CLI, daemon, actor-runtime, two-process, and harness tests
 ```
 
 ## See Also

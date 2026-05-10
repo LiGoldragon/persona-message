@@ -2,6 +2,9 @@ use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
+use kameo::actor::{Actor, ActorRef, Spawn};
+use kameo::error::Infallible;
+use kameo::message::{Context, Message};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
@@ -47,9 +50,11 @@ impl MessageDaemon {
         }
         let _ = std::fs::remove_file(self.socket.path());
         let listener = UnixListener::bind(self.socket.path())?;
+        let runtime = tokio::runtime::Runtime::new()?;
+        let actor = runtime.block_on(MessageDaemonActorHandle::start(self.store.clone()));
         for stream in listener.incoming() {
             match stream {
-                Ok(stream) => self.handle_stream(stream),
+                Ok(stream) => Self::handle_stream(&runtime, &actor, stream),
                 Err(error) => Err(error.into()),
             }
             .unwrap_or_else(|error| eprintln!("message-daemon client error: {error}"));
@@ -57,12 +62,94 @@ impl MessageDaemon {
         Ok(())
     }
 
-    fn handle_stream(&self, stream: UnixStream) -> Result<()> {
+    fn handle_stream(
+        runtime: &tokio::runtime::Runtime,
+        actor: &MessageDaemonActorHandle,
+        stream: UnixStream,
+    ) -> Result<()> {
         let envelope = DaemonFrame::from_stream(&stream)?.decode()?;
-        let response = envelope.execute(&self.store)?;
+        let response = runtime.block_on(actor.execute(envelope))?;
         let mut writer = stream;
         DaemonFrame::from_envelope(&response)?.write_to(&mut writer)?;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct MessageDaemonActor {
+    store: MessageStore,
+    executed_request_count: u64,
+    emitted_response_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct MessageDaemonActorHandle {
+    actor_reference: ActorRef<MessageDaemonActor>,
+}
+
+impl MessageDaemonActorHandle {
+    pub async fn start(store: MessageStore) -> Self {
+        let actor_reference = MessageDaemonActor::spawn(store);
+        actor_reference.wait_for_startup().await;
+        Self { actor_reference }
+    }
+
+    pub async fn execute(&self, envelope: DaemonEnvelope) -> Result<DaemonEnvelope> {
+        self.actor_reference
+            .ask(ExecuteDaemonEnvelope { envelope })
+            .await
+            .map_err(|error| Error::ActorCall {
+                detail: error.to_string(),
+            })
+    }
+
+    pub async fn stop(self) -> Result<()> {
+        self.actor_reference
+            .stop_gracefully()
+            .await
+            .map_err(|error| Error::ActorCall {
+                detail: error.to_string(),
+            })?;
+        self.actor_reference.wait_for_shutdown().await;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecuteDaemonEnvelope {
+    pub envelope: DaemonEnvelope,
+}
+
+impl Actor for MessageDaemonActor {
+    type Args = MessageStore;
+    type Error = Infallible;
+
+    async fn on_start(
+        store: Self::Args,
+        _actor_reference: ActorRef<Self>,
+    ) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            store,
+            executed_request_count: 0,
+            emitted_response_count: 0,
+        })
+    }
+}
+
+impl Message<ExecuteDaemonEnvelope> for MessageDaemonActor {
+    type Reply = Result<DaemonEnvelope>;
+
+    async fn handle(
+        &mut self,
+        message: ExecuteDaemonEnvelope,
+        _context: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if matches!(message.envelope, DaemonEnvelope::Request(_)) {
+            self.executed_request_count = self.executed_request_count.saturating_add(1);
+        }
+        let response = message.envelope.execute(&self.store)?;
+        self.emitted_response_count = self.emitted_response_count.saturating_add(1);
+        Ok(response)
     }
 }
 

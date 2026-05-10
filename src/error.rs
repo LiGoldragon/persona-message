@@ -69,6 +69,9 @@ pub enum Error {
     #[error("daemon binary codec: {detail}")]
     DaemonCodec { detail: String },
 
+    #[error("actor call failed: {detail}")]
+    ActorCall { detail: String },
+
     #[error("router response was empty")]
     RouterResponseEmpty,
 }

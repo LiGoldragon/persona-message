@@ -13,6 +13,8 @@ Rules for work here:
   Hand-edit `actors.nota` only when debugging the resolver itself.
 - Keep stateful harness workflows named under `scripts/` and exposed by
   `flake.nix`.
+- Keep daemon request execution inside the Kameo `MessageDaemonActor`; client
+  streams may decode frames, but store mutations belong behind that mailbox.
 - Keep real harness tests interactive and persistent. Do not replace them with
   non-interactive `claude --print` or `codex exec` checks.
 - Use `scripts/test-pty-pi-niri-focus` when validating `persona-system` focus
