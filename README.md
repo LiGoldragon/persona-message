@@ -7,9 +7,9 @@ When `message-daemon` is used, daemon requests pass through a Kameo
 `DaemonRoot`, then through its supervised `Ledger` child before touching that
 ledger.
 
-The shared binary contract now belongs to `signal-persona`. This repository
-remains useful as the text boundary for harnesses and humans: NOTA in, typed
-validation, NOTA projection out.
+The message binary contract belongs to `signal-persona-message`. This
+repository remains useful as the text boundary for harnesses and humans: NOTA
+in, typed validation, NOTA projection out.
 
 The first harness-to-harness path is deliberately small. A harness registers
 the process identity that should own its outbound messages:
@@ -77,7 +77,7 @@ run also verifies focus and prompt guards before releasing queued deliveries
 through pushed observations.
 
 BEADS remains useful for today's workspace coordination, but it is not part of
-the Persona API. Persona coordination flows through typed frames in
-`signal-persona`, durable component state lives in component-owned Sema
-databases through `persona-sema`, and delivery policy in `persona-router`, with
+the Persona API. Persona coordination flows through relation-specific typed
+Signal frames, durable component state lives in component-owned Sema layers
+over the `sema` library, and delivery policy lives in `persona-router`, with
 NOTA kept at the human and harness projection boundaries.

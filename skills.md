@@ -5,8 +5,8 @@ sender resolution, the transitional local ledger, or real harness message tests.
 
 Rules for work here:
 
-- Keep the repo at the human/harness text boundary. Shared binary records
-  belong in `signal-persona`.
+- Keep the repo at the human/harness text boundary. Message binary records
+  belong in `signal-persona-message`.
 - Keep sender identity resolved by process ancestry and actor registration; do
   not trust sender fields written by a model.
 - Use `Register` and `Agents` for normal local actor setup and inspection.
@@ -38,6 +38,6 @@ Rules for work here:
 - Treat the local ledger as transitional development state. Do not deepen it
   into the final database surface.
 
-Use component-to-component rkyv frames through `signal-persona` when the CLI or
-daemon crosses into router/store territory. Use NOTA only at CLI, harness, and
-audit projection boundaries.
+Use component-to-component rkyv frames through relation-specific Signal
+contracts when the CLI or daemon crosses into router/store territory. Use NOTA
+only at CLI, harness, and audit projection boundaries.

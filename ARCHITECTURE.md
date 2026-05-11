@@ -16,9 +16,9 @@ projects typed message records back to NOTA.
 
 ## 0 · TL;DR
 
-This repo is the text boundary, not the shared binary contract. Component-to-
-component traffic uses `signal-persona-message`; durable assembled state belongs
-to the router's `persona-sema`-backed state.
+This repo is the text boundary, not the binary contract. Component-to-component
+traffic uses `signal-persona-message`; durable assembled state belongs to the
+router-owned Sema layer over the `sema` library.
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ In the assembled runtime:
 - `persona-message` remains the NOTA CLI/projection layer;
 - `persona-router` owns routing, pending delivery, and durable message
   transitions;
-- `persona-router` uses `persona-sema` for typed storage tables;
+- `persona-router` uses a router-owned Sema layer for typed storage tables;
 - `signal-persona-message` owns the message channel wire records.
 
 ## 3 · Boundaries
@@ -73,7 +73,7 @@ This repo owns:
 
 This repo does not own:
 
-- shared rkyv frame types;
+- rkyv frame types owned by contract repos;
 - final routing policy;
 - final durable database;
 - OS/window-manager focus observations;
@@ -113,5 +113,5 @@ tests/                 CLI, daemon, actor-runtime, two-process, and harness test
 - `../signal-persona/ARCHITECTURE.md`
 - `../signal-persona-message/ARCHITECTURE.md`
 - `../persona-router/ARCHITECTURE.md`
-- `../persona-sema/ARCHITECTURE.md`
+- `../sema/ARCHITECTURE.md`
 - `../persona-wezterm/ARCHITECTURE.md`
