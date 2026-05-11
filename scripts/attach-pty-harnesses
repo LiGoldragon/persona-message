@@ -1,38 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-root="${1:-${PERSONA_PTY_HARNESS_ROOT:-}}"
-if [[ -z "$root" && -s /tmp/persona-pty-harnesses-current ]]; then
-  root="$(cat /tmp/persona-pty-harnesses-current)"
-fi
-if [[ -z "$root" ]]; then
-  echo "missing PTY harness root; pass one or run setup-pty-harnesses first" >&2
-  exit 2
-fi
-
-repo="${PERSONA_MESSAGE_REPO:-$PWD}"
-cd "$repo"
-source "$root/session.env"
-terminal_repo="${PERSONA_WEZTERM_REPO:-$(cd "$repo/../persona-wezterm" && pwd)}"
-terminal_target="$terminal_repo/target/debug"
-cargo build --manifest-path "$terminal_repo/Cargo.toml" --bin persona-wezterm-view >/dev/null
-
-setsid wezterm start \
-  --always-new-process \
-  --class persona-pty-harness \
-  --workspace persona-pty-harness \
-  --cwd "$root" \
-  -- env PERSONA_WEZTERM_HANDSHAKE="${PERSONA_WEZTERM_HANDSHAKE:-}" PERSONA_WEZTERM_VIEW_TITLE=PERSONA-OPERATOR-CODEX "$terminal_target/persona-wezterm-view" "$PERSONA_OPERATOR_SOCKET" >"$root/operator.attach.log" 2>&1 &
-operator_viewer="$!"
-
-setsid wezterm start \
-  --always-new-process \
-  --class persona-pty-harness \
-  --workspace persona-pty-harness \
-  --cwd "$root" \
-  -- env PERSONA_WEZTERM_HANDSHAKE="${PERSONA_WEZTERM_HANDSHAKE:-}" PERSONA_WEZTERM_VIEW_TITLE=PERSONA-DESIGNER-CLAUDE "$terminal_target/persona-wezterm-view" "$PERSONA_DESIGNER_SOCKET" >"$root/designer.attach.log" 2>&1 &
-designer_viewer="$!"
-
-echo "root=$root"
-echo "operator_viewer_pid=$operator_viewer"
-echo "designer_viewer_pid=$designer_viewer"
+exec "$(dirname "$0")/retired-terminal-workflow" "$(basename "$0")" "$@"

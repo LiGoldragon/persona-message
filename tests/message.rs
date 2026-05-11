@@ -1,6 +1,6 @@
 use nota_codec::Error;
 use persona_message::command::{CommandLine, Input};
-use persona_message::delivery::PromptState;
+use persona_message::delivery::{DeliveryDeferral, DeliveryGate, DeliveryState, PromptState};
 use persona_message::resolver::{ActorIndex, ProcessAncestry};
 use persona_message::router::SignalRouterFrameCodec;
 use persona_message::schema::{
@@ -115,13 +115,38 @@ fn human_endpoint_does_not_inject_terminal_input() {
             aux: None,
         }),
     };
-    let prompt = persona_wezterm::terminal::TerminalPrompt::from_text(
-        "(Message m-abc direct-designer-operator designer operator ready [])",
-    );
+    let prompt = "(Message m-abc direct-designer-operator designer operator ready [])";
 
     let delivered = actor.deliver(&prompt).expect("human endpoint is accepted");
 
     assert!(!delivered);
+}
+
+#[test]
+fn local_message_delivery_cannot_inject_terminal_input() {
+    let actor = Actor {
+        name: ActorId::new("operator"),
+        pid: std::process::id(),
+        endpoint: Some(EndpointTransport {
+            kind: EndpointKind::PtySocket,
+            target: "/tmp/persona-terminal.sock".to_string(),
+            aux: None,
+        }),
+    };
+
+    let outcome = DeliveryGate::from_environment()
+        .deliver(
+            &actor,
+            "(Message m-abc direct-designer-operator designer operator ready [])",
+        )
+        .expect("local gate evaluates endpoint");
+
+    assert_eq!(
+        outcome.state(),
+        &DeliveryState::Deferred(DeliveryDeferral::RouterRequired {
+            endpoint: EndpointKind::PtySocket,
+        })
+    );
 }
 
 #[test]

@@ -8,8 +8,6 @@
     fenix.inputs.nixpkgs.follows = "nixpkgs";
 
     crane.url = "github:ipetkov/crane";
-
-    persona-system.url = "github:LiGoldragon/persona-system";
   };
 
   outputs =
@@ -18,7 +16,6 @@
       nixpkgs,
       fenix,
       crane,
-      persona-system,
     }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
@@ -49,9 +46,27 @@
 
               touch "$out"
             '';
+          sourceConstraintCheck =
+            name: script:
+            pkgs.runCommand name { } ''
+              set -euo pipefail
+
+              export PATH=${pkgs.lib.makeBinPath [ pkgs.ripgrep ]}:$PATH
+              ${pkgs.bash}/bin/bash ${script} ${./.}
+
+              touch "$out"
+            '';
         in
         {
-          inherit pkgs toolchain craneLib commonArgs cargoArtifacts messageConstraintCheck;
+          inherit
+            pkgs
+            toolchain
+            craneLib
+            commonArgs
+            cargoArtifacts
+            messageConstraintCheck
+            sourceConstraintCheck
+            ;
         };
     in
     {
@@ -62,71 +77,67 @@
         in
         {
           test-basic = context.pkgs.writeShellScriptBin "persona-message-test-basic" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-basic} "$@"
           '';
           test-actual-harness = context.pkgs.writeShellScriptBin "persona-message-test-actual-harness" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-actual-harness} "$@"
           '';
           test-actual-codex-to-claude = context.pkgs.writeShellScriptBin "persona-message-test-actual-codex-to-claude" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-actual-codex-to-claude} "$@"
           '';
           test-actual-claude-to-codex = context.pkgs.writeShellScriptBin "persona-message-test-actual-claude-to-codex" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-actual-claude-to-codex} "$@"
           '';
-          debug-wezterm-claude-ready = context.pkgs.writeShellScriptBin "persona-message-debug-wezterm-claude-ready" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
-            exec ${context.pkgs.bash}/bin/bash ${./scripts/debug-wezterm-claude-ready} "$@"
-          '';
           setup-harnesses = context.pkgs.writeShellScriptBin "persona-message-setup-harnesses" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/setup-harnesses} "$@"
           '';
           setup-harnesses-visible = context.pkgs.writeShellScriptBin "persona-message-setup-harnesses-visible" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/setup-harnesses-visible} "$@"
           '';
           setup-harnesses-headless = context.pkgs.writeShellScriptBin "persona-message-setup-harnesses-headless" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/setup-harnesses-headless} "$@"
           '';
           attach-harnesses = context.pkgs.writeShellScriptBin "persona-message-attach-harnesses" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.ripgrep ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             export PERSONA_MESSAGE_SCRIPT_DIR=${./scripts}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/attach-harnesses} "$@"
           '';
           test-running-harnesses = context.pkgs.writeShellScriptBin "persona-message-test-running-harnesses" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.ripgrep ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             export PERSONA_MESSAGE_SCRIPT_DIR=${./scripts}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-running-harnesses} "$@"
           '';
           teardown-harnesses = context.pkgs.writeShellScriptBin "persona-message-teardown-harnesses" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             export PERSONA_MESSAGE_SCRIPT_DIR=${./scripts}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/teardown-harnesses} "$@"
           '';
           view-harnesses = context.pkgs.writeShellScriptBin "persona-message-view-harnesses" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             export PERSONA_MESSAGE_SCRIPT_DIR=${./scripts}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/view-harnesses} "$@"
           '';
           setup-pty-demo = context.pkgs.writeShellScriptBin "persona-message-setup-pty-demo" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/setup-pty-demo} "$@"
           '';
           attach-pty-demo = context.pkgs.writeShellScriptBin "persona-message-attach-pty-demo" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/attach-pty-demo} "$@"
           '';
@@ -136,39 +147,37 @@
             exec ${context.pkgs.bash}/bin/bash ${./scripts/teardown-pty-demo} "$@"
           '';
           setup-pty-harnesses = context.pkgs.writeShellScriptBin "persona-message-setup-pty-harnesses" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.python3 ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.python3 ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/setup-pty-harnesses} "$@"
           '';
           setup-pty-pi = context.pkgs.writeShellScriptBin "persona-message-setup-pty-pi" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/setup-pty-pi} "$@"
           '';
           test-pty-pi-message = context.pkgs.writeShellScriptBin "persona-message-test-pty-pi-message" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.ripgrep ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-pty-pi-message} "$@"
           '';
           test-pty-pi-niri-focus = context.pkgs.writeShellScriptBin "persona-message-test-pty-pi-niri-focus" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep context.pkgs.python3 ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.ripgrep context.pkgs.python3 ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
-            export PERSONA_SYSTEM_BIN=''${PERSONA_SYSTEM_BIN:-${persona-system.packages.${system}.default}/bin/system}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-pty-pi-niri-focus} "$@"
           '';
           test-pty-pi-guarded-delivery = context.pkgs.writeShellScriptBin "persona-message-test-pty-pi-guarded-delivery" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm context.pkgs.ripgrep context.pkgs.python3 ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.ripgrep context.pkgs.python3 ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
-            export PERSONA_SYSTEM_BIN=''${PERSONA_SYSTEM_BIN:-${persona-system.packages.${system}.default}/bin/system}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/test-pty-pi-guarded-delivery} "$@"
           '';
           attach-pty-harnesses = context.pkgs.writeShellScriptBin "persona-message-attach-pty-harnesses" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/attach-pty-harnesses} "$@"
           '';
           attach-pty-pi = context.pkgs.writeShellScriptBin "persona-message-attach-pty-pi" ''
-            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix context.pkgs.wezterm ]}:$PATH
+            export PATH=${context.pkgs.lib.makeBinPath [ context.toolchain context.pkgs.nix ]}:$PATH
             export PERSONA_MESSAGE_REPO=''${PERSONA_MESSAGE_REPO:-$PWD}
             exec ${context.pkgs.bash}/bin/bash ${./scripts/attach-pty-pi} "$@"
           '';
@@ -228,10 +237,6 @@
           test-actual-claude-to-codex = {
             type = "app";
             program = "${packages.test-actual-claude-to-codex}/bin/persona-message-test-actual-claude-to-codex";
-          };
-          debug-wezterm-claude-ready = {
-            type = "app";
-            program = "${packages.debug-wezterm-claude-ready}/bin/persona-message-debug-wezterm-claude-ready";
           };
           setup-harnesses = {
             type = "app";
@@ -334,6 +339,8 @@
           );
           message-cli-accepts-one-nota-record-and-prints-one-nota-reply =
             context.messageConstraintCheck "message-cli-accepts-one-nota-record-and-prints-one-nota-reply" ./scripts/message-cli-accepts-one-nota-record-and-prints-one-nota-reply;
+          message-runtime-cannot-reference-retired-terminal-brand =
+            context.sourceConstraintCheck "message-runtime-cannot-reference-retired-terminal-brand" ./scripts/message-runtime-cannot-reference-retired-terminal-brand;
           message-cli-sends-router-signal-without-local-ledger = context.craneLib.cargoTest (
             context.commonArgs
             // {
@@ -369,7 +376,7 @@
               context.toolchain
               context.pkgs.jujutsu
               context.pkgs.nix
-              context.pkgs.wezterm
+             
             ];
           };
         }

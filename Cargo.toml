@@ -22,8 +22,6 @@ path = "src/bin/message-daemon.rs"
 [dependencies]
 kameo           = { version = "0.20", default-features = false, features = ["macros", "tracing"] }
 nota-codec      = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
-persona-system  = { git = "https://github.com/LiGoldragon/persona-system.git", branch = "main" }
-persona-wezterm = { git = "https://github.com/LiGoldragon/persona-wezterm.git", branch = "main" }
 rkyv            = "0.8"
 signal-core     = { git = "https://github.com/LiGoldragon/signal-core.git" }
 signal-persona-message = { git = "https://github.com/LiGoldragon/signal-persona-message.git" }

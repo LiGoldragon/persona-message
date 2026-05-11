@@ -8,7 +8,6 @@ use crate::delivery::{DeliveryGate, DeliveryOutcome};
 use crate::error::{Error, Result};
 use crate::resolver::{ActorIndex, ProcessAncestry};
 use crate::schema::{Actor, ActorId, Message};
-use persona_wezterm::terminal::TerminalPrompt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorePath {
@@ -116,7 +115,7 @@ impl MessageStore {
         let Some(actor) = actors.actor(&message.to) else {
             return Ok(DeliveryOutcome::unreachable());
         };
-        let prompt = TerminalPrompt::from_text(message.to_nota()?);
+        let prompt = message.to_nota()?;
         let outcome = DeliveryGate::from_environment().deliver(actor, &prompt)?;
         if outcome.deferred_delivery() {
             self.defer(message)?;
@@ -185,7 +184,7 @@ impl MessageStore {
                 deferred.push(message);
                 continue;
             };
-            let prompt = TerminalPrompt::from_text(message.to_nota()?);
+            let prompt = message.to_nota()?;
             let outcome = DeliveryGate::from_environment().deliver(actor, &prompt)?;
             if outcome.delivered_to_terminal() {
                 delivered += 1;

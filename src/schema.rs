@@ -188,7 +188,6 @@ pub struct EndpointTransport {
 pub enum EndpointKind {
     Human,
     PtySocket,
-    WezTermPane,
 }
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]

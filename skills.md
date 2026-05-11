@@ -24,16 +24,12 @@ Rules for work here:
   the supervised `Ledger` child.
 - Do not add empty marker Kameo messages. Runtime inspection and mailbox-path
   witnesses carry data describing what is being inspected.
-- Keep real harness tests interactive and persistent. Do not replace them with
-  non-interactive `claude --print` or `codex exec` checks.
-- Use `scripts/test-pty-pi-niri-focus` when validating `persona-system` focus
-  observations against actual visible Pi harness windows.
-- Use `scripts/test-pty-pi-guarded-delivery` when validating that terminal
-  delivery defers while a target harness window is focused and delivers only
-  after focus moves to a neutral window.
-- The old router-delivery and router-relay scripts used a router NOTA line
-  socket and are retired. Rebuild those workflows only with typed Signal
+- Keep real harness tests interactive and persistent. Retired terminal harness
+  scripts remain only as migration reporters; rebuild their workflows through
+  `persona-router`, `persona-harness`, `persona-terminal`, and typed Signal
   contracts.
+- The old router-delivery, router-relay, and local terminal-delivery scripts
+  are retired. Rebuild those workflows only with typed Signal contracts.
 - Treat the local ledger as transitional development state. Do not deepen it
   into the final database or router protocol surface.
 

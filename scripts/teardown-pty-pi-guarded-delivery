@@ -1,17 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-root="${PERSONA_PTY_PI_GUARD_ROOT:-$(cat /tmp/persona-pty-pi-guard-current 2>/dev/null || true)}"
-if [[ -z "$root" || ! -d "$root" ]]; then
-  echo "no persona guarded Pi root found"
-  exit 0
-fi
-
-for file in "$root"/*.viewer.pid "$root"/*.daemon.pid "$root"/*.pid "$root"/*.neutral.pid; do
-  [[ -f "$file" ]] || continue
-  pid="$(cat "$file" 2>/dev/null || true)"
-  [[ "$pid" =~ ^[0-9]+$ ]] || continue
-  kill "$pid" 2>/dev/null || true
-done
-
-echo "torn_down=$root"
+exec "$(dirname "$0")/retired-terminal-workflow" "$(basename "$0")" "$@"

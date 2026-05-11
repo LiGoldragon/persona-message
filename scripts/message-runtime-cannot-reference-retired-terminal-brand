@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_root="${1:?usage: message-runtime-cannot-reference-retired-terminal-brand <source-root>}"
+
+if rg --line-number \
+  --glob 'Cargo.toml' \
+  --glob 'Cargo.lock' \
+  --glob 'flake.nix' \
+  --glob 'src/**' \
+  --glob 'tests/**' \
+  --glob 'scripts/**' \
+  --glob '!scripts/retired-terminal-workflow' \
+  'WezTerm|wezterm|WEZTERM|persona-wezterm|persona_wezterm|WezTermPane' \
+  "$source_root"
+then
+  echo "active persona-message runtime still references retired terminal-brand infrastructure" >&2
+  exit 1
+fi

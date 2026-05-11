@@ -10,12 +10,6 @@ pub enum Error {
     #[error("nota: {0}")]
     Nota(#[from] nota_codec::Error),
 
-    #[error("terminal: {0}")]
-    Terminal(#[from] persona_wezterm::Error),
-
-    #[error("system: {0}")]
-    System(#[from] persona_system::Error),
-
     #[error("signal frame: {0}")]
     SignalFrame(#[from] signal_core::FrameError),
 
@@ -53,12 +47,6 @@ pub enum Error {
 
     #[error("process id {got:?} is invalid")]
     InvalidProcessId { got: String },
-
-    #[error("wezterm pane id {got:?} is invalid")]
-    InvalidPaneId { got: String },
-
-    #[error("niri window target {got:?} is invalid")]
-    InvalidNiriWindowTarget { got: String },
 
     #[error("daemon socket is not configured")]
     MissingDaemonSocket,
