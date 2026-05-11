@@ -10,7 +10,7 @@ if rg --line-number \
   --glob 'src/**' \
   --glob 'tests/**' \
   --glob 'scripts/**' \
-  --glob '!scripts/retired-terminal-workflow' \
+  --glob '!scripts/message-runtime-cannot-reference-retired-terminal-brand' \
   'WezTerm|wezterm|WEZTERM|persona-wezterm|persona_wezterm|WezTermPane' \
   "$source_root"
 then

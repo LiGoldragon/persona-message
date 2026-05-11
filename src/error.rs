@@ -22,13 +22,6 @@ pub enum Error {
     #[error("unexpected command-line argument: {got:?}")]
     UnexpectedArgument { got: String },
 
-    #[error("message store line {line} is invalid in {path:?}")]
-    InvalidStoreLine {
-        path: PathBuf,
-        line: usize,
-        source: nota_codec::Error,
-    },
-
     #[error("actor index line {line} is invalid in {path:?}")]
     InvalidActorLine {
         path: PathBuf,
@@ -48,20 +41,11 @@ pub enum Error {
     #[error("process id {got:?} is invalid")]
     InvalidProcessId { got: String },
 
-    #[error("daemon socket is not configured")]
-    MissingDaemonSocket,
+    #[error("router socket is not configured; set PERSONA_MESSAGE_ROUTER_SOCKET")]
+    SignalRouterSocketMissing,
 
-    #[error("daemon response was invalid: {got}")]
-    InvalidDaemonResponse { got: String },
-
-    #[error("daemon binary frame is too large: {bytes} bytes")]
+    #[error("signal frame is too large: {bytes} bytes")]
     DaemonFrameTooLarge { bytes: usize },
-
-    #[error("daemon binary codec: {detail}")]
-    DaemonCodec { detail: String },
-
-    #[error("actor call failed: {detail}")]
-    ActorCall { detail: String },
 
     #[error("router reply was not valid for this command: {got}")]
     UnexpectedRouterReply { got: String },

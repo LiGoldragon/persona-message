@@ -1,138 +1,110 @@
 # persona-message — architecture
 
-*Human and harness NOTA boundary for Persona messages.*
+*NOTA boundary and stateless router proxy for Persona messages.*
 
-`persona-message` owns the `message` CLI and the transitional human/harness
-projection surface for Persona messages. It validates one NOTA input record,
-converts router-bound message operations into `signal-persona-message` frames,
-and projects typed router replies back to NOTA.
+`persona-message` owns the `message` CLI. It validates one NOTA request,
+projects supported message operations into `signal-persona-message` frames,
+sends them to `persona-router`, and projects the typed router reply back to
+NOTA.
 
 > **Scope.** Any "sema" reference in this doc means today's `sema`
-> library (rename pending → `sema-db`). The eventual `Sema` is
-> broader; today's persona-message is a realization step. See
-> `~/primary/ESSENCE.md` §"Today and eventually".
+> library (rename pending → `sema-db`). The eventual `Sema` is broader; today's
+> persona-message is a realization step. See `~/primary/ESSENCE.md` §"Today and
+> eventually".
 
 ---
 
 ## 0 · TL;DR
 
-This repo is the text boundary and proxy, not the durable message ledger.
-Component-to-component traffic uses `signal-persona-message`; durable assembled
-state belongs to the router-owned Sema layer over the `sema` library.
+This repo is a text boundary and proxy, not a durable message ledger.
 
 ```mermaid
 flowchart LR
-    "human or harness" -->|"NOTA Send"| "message CLI"
-    "message CLI" -->|"MessageSubmission frame"| "signal-persona-message"
-    "signal-persona-message" -->|"length-prefixed rkyv"| "persona-router"
-    "persona-router" -->|"MessageReply frame"| "message CLI"
-    "message CLI" -->|"NOTA reply"| "human or harness"
-    "message-daemon" -. "Kameo mailbox" .-> "Ledger"
-    "Ledger" -. "transitional only" .-> "messages.nota.log"
+    "human or harness" -->|"one NOTA Send or Inbox"| "message CLI"
+    "message CLI" -->|"length-prefixed signal-persona-message frame"| "persona-router"
+    "persona-router" -->|"length-prefixed reply frame"| "message CLI"
+    "message CLI" -->|"one NOTA reply"| "human or harness"
 ```
 
 ## 1 · Component Surface
 
 `persona-message` exposes:
 
-- `message` CLI for NOTA input/output;
-- Signal-frame router proxying through `PERSONA_MESSAGE_ROUTER_SOCKET`;
-- `message-daemon` as the transitional daemon surface;
-- a Kameo `DaemonRoot` that owns daemon request intake;
-- a supervised Kameo `Ledger` child that owns transitional ledger reads and
-  writes behind the root;
-- local actor resolution from process ancestry;
-- actor registration and listing through `Register` and `Agents`;
-- local append/read surfaces for legacy message tests;
-- stateful harness scripts exposed through Nix apps.
+- a `message` binary;
+- NOTA `Send` and `Inbox` input records;
+- one length-prefixed `signal-persona-message` request frame per invocation;
+- one NOTA reply projection per invocation;
+- read-only caller resolution from the transitional `actors.nota` file.
 
 ## 2 · State and Ownership
 
-The target `Send` and `Inbox` path is `message` → `signal-persona-message` →
-`persona-router`. When `PERSONA_MESSAGE_ROUTER_SOCKET` is set, `message`
-encodes a length-prefixed Signal frame, waits for one Signal reply frame, and
-prints one NOTA projection of that reply. That path must not append to
-`messages.nota.log`; the router is the durable owner. The CLI resolves the
-caller from process ancestry and carries it as Signal auth. The
-`MessageSubmission` payload remains sender-free.
+The proxy owns no durable message state. It requires
+`PERSONA_MESSAGE_ROUTER_SOCKET` and exits if the router socket is absent.
 
-The current local ledger is development state. It keeps older harness tests
-usable before `persona-router` fully owns delivery and router-scoped durable
-commits. While the transitional daemon is running, client requests enter
-through `DaemonRoot`. Ledger reads and writes then cross into the supervised
-`Ledger`, so the root coordinates daemon requests and the ledger owns the
-mutation plane.
+Caller identity is resolved from process ancestry against `actors.nota` and
+carried as Signal auth. The `MessageSubmission` and `InboxQuery` payloads remain
+sender-free.
 
-In the assembled runtime:
-
-- `persona-message` remains the NOTA CLI/projection layer;
-- `persona-router` owns routing, pending delivery, and durable message
-  transitions;
-- `persona-router` uses a router-owned Sema layer for typed storage tables;
-- `signal-persona-message` owns the message channel wire records.
+The transitional `actors.nota` file is read-only from this repo. Actor
+registration, actor listing, pending delivery, retry, delivery results, and
+message ledger state are router or engine-manager concerns, not proxy state.
 
 ## 3 · Boundaries
 
 This repo owns:
 
-- NOTA `Register`, `Agents`, `Send`, `Inbox`, and `Tail` CLI surfaces;
-- proxying `Send` and `Inbox` to `persona-router` as
-  `signal-persona-message` frames;
-- sender resolution from process ancestry for Signal auth and for the local
-  development path;
-- human/harness message projection;
-- stateful real-harness test scripts.
+- NOTA parsing for the `message` command;
+- projection from NOTA `Send` / `Inbox` to `signal-persona-message`;
+- projection from `signal-persona-message` replies back to NOTA;
+- process-ancestry caller lookup for Signal auth.
 
 This repo does not own:
 
-- rkyv frame types owned by contract repos;
+- message or router contract definitions;
 - final routing policy;
-- final durable database;
-- OS/window-manager focus observations;
-- terminal byte transport.
+- durable database tables;
+- actor registration writes;
+- local message ledgers;
+- terminal endpoint vocabulary;
+- terminal byte transport;
+- daemon runtime state.
 
 ## 4 · Invariants
 
-- Sender identity is trusted from process ancestry, not model text.
-- Agents register their local process identity before sending; ad hoc
-  `actors.nota` edits are a fallback for debugging, not the normal path.
-- NOTA input is decoded into typed Rust before it affects state.
-- With `PERSONA_MESSAGE_ROUTER_SOCKET`, `Send` and `Inbox` use
-  `signal-persona-message` length-prefixed rkyv frames.
-- The caller identity in the Signal path is auth, not a field in
-  `MessageSubmission`.
-- The Signal router path never writes `messages.nota.log`; durable message
-  acceptance belongs to `persona-router`.
-- `persona-router` ingress is Signal-only. Do not add a router line-protocol
-  fallback.
-- Daemon requests touch the transitional ledger only through Kameo mailboxes:
-  `DaemonRoot` first, supervised `Ledger` second.
-- Kameo messages are data-bearing; empty marker messages are forbidden for
-  runtime-path tests and inspection.
-- Harness tests target interactive persistent harnesses, not non-interactive
-  provider commands.
-- Repeated debug commands become named scripts and Nix apps.
-- BEADS remains outside the Persona API.
+- The CLI accepts exactly one NOTA input record.
+- The CLI prints exactly one NOTA reply record.
+- Supported input variants are `Send` and `Inbox`.
+- The router socket is mandatory.
+- Outbound traffic is a length-prefixed rkyv Signal frame.
+- Caller identity is Signal auth, not a request payload field.
+- The proxy does not write local message or pending logs.
+- The proxy does not build or run a daemon.
+- The proxy does not depend on an actor runtime.
 
 ## Code Map
 
 ```text
-src/main.rs            message CLI entry
-src/bin/message-daemon.rs
-src/actors/            Kameo actor planes
-src/schema.rs          NOTA-facing records
-src/resolver.rs        process ancestry sender resolution
-src/router.rs          Signal router client
-src/store.rs           transitional local ledger
-src/daemon.rs          transitional daemon surface and daemon root actor
-scripts/               repeatable stateful harness workflows
-tests/                 CLI, daemon, actor-runtime, two-process, and harness tests
+src/main.rs       message CLI entry
+src/command.rs    NOTA input/output projection
+src/resolver.rs   read-only process ancestry to actor lookup
+src/router.rs     Signal router client
+src/schema.rs     proxy-local NOTA actor id records
+src/error.rs      crate error enum
+tests/            proxy and architectural-truth tests
 ```
+
+## Constraint Tests
+
+| Constraint | Test |
+|---|---|
+| The router Signal path cannot create a local message ledger. | `nix flake check .#message-cli-sends-router-signal-without-local-ledger` |
+| Inbox reads come from the router, not a local ledger. | `nix flake check .#message-cli-inbox-uses-router-signal-not-local-ledger` |
+| The router socket is mandatory. | `nix flake check .#message-cli-requires-router-socket` |
+| Retired terminal-brand vocabulary cannot return. | `nix flake check .#message-runtime-cannot-reference-retired-terminal-brand` |
+| Local ledger, daemon, endpoint, and actor-runtime surfaces cannot return. | `nix flake check .#message-proxy-cannot-own-local-ledger` |
 
 ## See Also
 
-- `../signal-persona/ARCHITECTURE.md`
 - `../signal-persona-message/ARCHITECTURE.md`
 - `../persona-router/ARCHITECTURE.md`
-- `../sema/ARCHITECTURE.md`
-- `../persona-terminal/ARCHITECTURE.md`
+- `../signal-persona/ARCHITECTURE.md`

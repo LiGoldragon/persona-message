@@ -1,7 +1,46 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::schema::{Actor, ActorId};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActorIndexPath {
+    path: PathBuf,
+}
+
+impl ActorIndexPath {
+    pub fn from_environment() -> Self {
+        if let Some(path) = std::env::var_os("PERSONA_MESSAGE_ACTORS") {
+            return Self::from_path(path);
+        }
+
+        let root = std::env::var_os("PERSONA_MESSAGE_STORE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(".persona-message"));
+        Self::from_path(root.join("actors.nota"))
+    }
+
+    pub fn from_path(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    pub fn path(&self) -> &Path {
+        self.path.as_path()
+    }
+
+    pub fn load(&self) -> Result<ActorIndex> {
+        ActorIndex::load(self.path())
+    }
+
+    pub fn resolve_current_process(&self) -> Result<ActorId> {
+        let ancestry = ProcessAncestry::current()?;
+        self.load()?
+            .resolve(&ancestry)
+            .ok_or_else(|| Error::NoMatchingAgent {
+                path: self.path.clone(),
+            })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActorIndex {
@@ -16,16 +55,6 @@ impl ActorIndex {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)?;
         Self::from_text(path, &text)
-    }
-
-    pub fn load_or_empty(path: &Path) -> Result<Self> {
-        match std::fs::read_to_string(path) {
-            Ok(text) => Self::from_text(path, &text),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(Self { actors: Vec::new() })
-            }
-            Err(error) => Err(error.into()),
-        }
     }
 
     fn from_text(path: &Path, text: &str) -> Result<Self> {
@@ -44,17 +73,6 @@ impl ActorIndex {
         Ok(Self { actors })
     }
 
-    pub fn upsert(&mut self, actor: Actor) {
-        match self
-            .actors
-            .iter_mut()
-            .find(|entry| entry.name == actor.name)
-        {
-            Some(entry) => *entry = actor,
-            None => self.actors.push(actor),
-        }
-    }
-
     pub fn resolve(&self, ancestry: &ProcessAncestry) -> Option<ActorId> {
         ancestry.pids().iter().find_map(|pid| {
             self.actors
@@ -62,10 +80,6 @@ impl ActorIndex {
                 .find(|actor| actor.pid == *pid)
                 .map(|actor| actor.name.clone())
         })
-    }
-
-    pub fn actor(&self, actor: &ActorId) -> Option<&Actor> {
-        self.actors.iter().find(|entry| &entry.name == actor)
     }
 
     pub fn actors(&self) -> &[Actor] {
@@ -102,14 +116,6 @@ impl ProcessAncestry {
 
     pub fn pids(&self) -> &[u32] {
         self.pids.as_slice()
-    }
-
-    pub fn registration_pid(&self) -> Result<u32> {
-        self.pids
-            .get(1)
-            .or_else(|| self.pids.first())
-            .copied()
-            .ok_or(Error::EmptyProcessAncestry)
     }
 }
 

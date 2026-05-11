@@ -1,10 +1,10 @@
 use persona_message::Result;
 use persona_message::command::CommandLine;
-use persona_message::store::MessageStore;
+use persona_message::resolver::ActorIndexPath;
 
 fn main() -> Result<()> {
     let command_line = CommandLine::from_env();
-    let store = MessageStore::from_environment();
-    command_line.run(&store, std::io::stdout().lock())?;
+    let actor_index_path = ActorIndexPath::from_environment();
+    command_line.run(&actor_index_path, std::io::stdout().lock())?;
     Ok(())
 }

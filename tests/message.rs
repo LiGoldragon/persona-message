@@ -1,49 +1,166 @@
 use nota_codec::Error;
 use persona_message::command::{CommandLine, Input};
-use persona_message::delivery::{DeliveryDeferral, DeliveryGate, DeliveryState, PromptState};
-use persona_message::resolver::{ActorIndex, ProcessAncestry};
+use persona_message::resolver::{ActorIndex, ActorIndexPath, ProcessAncestry};
 use persona_message::router::SignalRouterFrameCodec;
-use persona_message::schema::{
-    Actor, ActorId, EndpointKind, EndpointTransport, Message, MessageIdKind,
-};
-use persona_message::store::{MessageStore, StorePath};
+use persona_message::schema::{Actor, ActorId};
 use signal_core::{AuthProof, FrameBody, Reply, Request, SemaVerb};
 use signal_persona_message::{
     Frame, InboxEntry, InboxListing, MessageBody, MessageReply, MessageRequest, MessageSender,
     MessageSlot, SubmissionAcceptance,
 };
 use std::os::unix::net::UnixListener;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-#[test]
-fn message_round_trips_through_nota() {
-    let text = "(Message m-1 thread-1 operator designer \"Need a design pass.\" [])";
-    let message = Message::from_nota(text).expect("message decodes");
+struct ActorIndexFixture {
+    directory: tempfile::TempDir,
+    store_path: PathBuf,
+}
 
-    assert_eq!(message.id.as_str(), "m-1");
-    assert_eq!(message.thread.as_str(), "thread-1");
-    assert_eq!(message.from.as_str(), "operator");
-    assert_eq!(message.to.as_str(), "designer");
+impl ActorIndexFixture {
+    fn new() -> Self {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store_path = directory.path().join("store");
+        std::fs::create_dir_all(&store_path).expect("store directory");
+        Self {
+            directory,
+            store_path,
+        }
+    }
 
-    let encoded = message.to_nota().expect("message encodes");
-    assert_eq!(
-        Message::from_nota(&encoded).expect("encoded decodes"),
-        message
-    );
+    fn store_path(&self) -> &Path {
+        self.store_path.as_path()
+    }
+
+    fn actor_index_path(&self) -> ActorIndexPath {
+        ActorIndexPath::from_path(self.store_path.join("actors.nota"))
+    }
+
+    fn router_socket_path(&self) -> PathBuf {
+        self.directory.path().join("router.signal.sock")
+    }
+
+    fn start_path(&self) -> PathBuf {
+        self.directory.path().join("start")
+    }
+
+    fn write_actor(&self, name: &str, pid: u32) {
+        let actor = Actor {
+            name: ActorId::new(name),
+            pid,
+        };
+        std::fs::write(
+            self.store_path.join("actors.nota"),
+            format!("{}\n", actor.to_nota().expect("actor encodes")),
+        )
+        .expect("actor index writes");
+    }
+
+    fn spawn_message_after_start(
+        &self,
+        start_path: &Path,
+        router_socket_path: Option<&Path>,
+        input: &str,
+    ) -> std::process::Child {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(format!(
+            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '{}'",
+            start_path.display(),
+            env!("CARGO_BIN_EXE_message"),
+            input
+        ));
+        command.env("PERSONA_MESSAGE_STORE", &self.store_path);
+        if let Some(router_socket_path) = router_socket_path {
+            command.env("PERSONA_MESSAGE_ROUTER_SOCKET", router_socket_path);
+        }
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.spawn().expect("message shell starts")
+    }
+}
+
+struct RouterReply {
+    frame: Frame,
+}
+
+impl RouterReply {
+    fn accepted(slot: u64) -> Self {
+        Self {
+            frame: Frame::new(FrameBody::Reply(Reply::operation(
+                MessageReply::SubmissionAccepted(SubmissionAcceptance {
+                    message_slot: MessageSlot::new(slot),
+                }),
+            ))),
+        }
+    }
+
+    fn inbox(sender: &str, body: &str) -> Self {
+        Self {
+            frame: Frame::new(FrameBody::Reply(Reply::operation(
+                MessageReply::InboxListing(InboxListing {
+                    messages: vec![InboxEntry {
+                        message_slot: MessageSlot::new(3),
+                        sender: MessageSender::new(sender),
+                        body: MessageBody::new(body),
+                    }],
+                }),
+            ))),
+        }
+    }
+}
+
+struct RecordedFrame {
+    auth_actor: String,
+    request: MessageRequest,
+}
+
+struct FakeRouter {
+    listener: UnixListener,
+    start_path: PathBuf,
+}
+
+impl FakeRouter {
+    fn bind(socket_path: &Path, start_path: PathBuf) -> Self {
+        Self {
+            listener: UnixListener::bind(socket_path).expect("router socket binds"),
+            start_path,
+        }
+    }
+
+    fn serve(self, reply: RouterReply) -> std::thread::JoinHandle<RecordedFrame> {
+        std::thread::spawn(move || {
+            std::fs::write(&self.start_path, "").expect("start marker writes");
+            let (mut stream, _) = self.listener.accept().expect("router accepts");
+            let codec = SignalRouterFrameCodec::default();
+            let frame = codec.read_frame(&mut stream).expect("router input reads");
+            let Some(AuthProof::LocalOperator(proof)) = frame.auth() else {
+                panic!("expected local operator auth proof");
+            };
+            let auth_actor = proof.operator().to_string();
+            let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
+                panic!("expected signal request frame");
+            };
+            assert_eq!(verb, SemaVerb::Assert);
+            codec
+                .write_frame(&mut stream, &reply.frame)
+                .expect("router reply writes");
+            RecordedFrame {
+                auth_actor,
+                request: payload,
+            }
+        })
+    }
 }
 
 #[test]
-fn agents_config_resolves_process_ancestry() {
+fn actor_index_resolves_process_ancestry() {
     let config = ActorIndex::from_actors(vec![
         Actor {
             name: ActorId::new("operator"),
             pid: 10,
-            endpoint: None,
         },
         Actor {
             name: ActorId::new("designer"),
             pid: 20,
-            endpoint: None,
         },
     ]);
     let ancestry = ProcessAncestry::from_pids(vec![40, 30, 20, 10]);
@@ -54,446 +171,155 @@ fn agents_config_resolves_process_ancestry() {
 }
 
 #[test]
-fn actor_endpoint_round_trips_with_owned_endpoint() {
+fn actor_index_file_round_trips_without_endpoint_vocabulary() {
     let actor = Actor {
-        name: ActorId::new("designer"),
+        name: ActorId::new("operator"),
         pid: 42,
-        endpoint: Some(EndpointTransport {
-            kind: EndpointKind::PtySocket,
-            target: "/tmp/designer.sock".to_string(),
-            aux: None,
-        }),
     };
 
     let encoded = actor.to_nota().expect("actor encodes");
     let decoded = Actor::from_nota(&encoded).expect("actor decodes");
 
-    assert!(encoded.contains("PtySocket"));
+    assert_eq!(encoded, "(Actor operator 42)");
     assert_eq!(decoded, actor);
-    assert_eq!(
-        Actor::from_nota("(Actor operator 7 None)")
-            .expect("actor decodes without endpoint")
-            .endpoint,
-        None
-    );
-    assert_eq!(
-        Actor::from_nota(
-            r#"(Actor responder 77 (EndpointTransport PtySocket "/tmp/responder.sock" None))"#
-        )
-        .expect("pty actor decodes")
-        .endpoint
-        .expect("endpoint exists")
-        .target
-        .as_str(),
-        "/tmp/responder.sock"
-    );
 }
 
 #[test]
-fn actor_endpoint_kind_rejects_unknown_transport() {
-    let err =
-        Actor::from_nota(r#"(Actor responder 77 (EndpointTransport Bogus "/tmp/socket" None))"#)
-            .expect_err("unknown endpoint transport is rejected");
+fn actor_index_path_reads_legacy_store_environment_directory() {
+    let fixture = ActorIndexFixture::new();
+    fixture.write_actor("operator", std::process::id());
 
-    match err {
-        Error::UnknownVariant { enum_name, got } => {
-            assert_eq!(enum_name, "EndpointKind");
-            assert_eq!(got, "Bogus");
-        }
-        other => panic!("expected UnknownVariant, got {other:?}"),
-    }
-}
+    let resolved = fixture
+        .actor_index_path()
+        .resolve_current_process()
+        .expect("actor resolves");
 
-#[test]
-fn human_endpoint_does_not_inject_terminal_input() {
-    let actor = Actor {
-        name: ActorId::new("operator"),
-        pid: std::process::id(),
-        endpoint: Some(EndpointTransport {
-            kind: EndpointKind::Human,
-            target: "operator".to_string(),
-            aux: None,
-        }),
-    };
-    let prompt = "(Message m-abc direct-designer-operator designer operator ready [])";
-
-    let delivered = actor.deliver(&prompt).expect("human endpoint is accepted");
-
-    assert!(!delivered);
-}
-
-#[test]
-fn local_message_delivery_cannot_inject_terminal_input() {
-    let actor = Actor {
-        name: ActorId::new("operator"),
-        pid: std::process::id(),
-        endpoint: Some(EndpointTransport {
-            kind: EndpointKind::PtySocket,
-            target: "/tmp/persona-terminal.sock".to_string(),
-            aux: None,
-        }),
-    };
-
-    let outcome = DeliveryGate::from_environment()
-        .deliver(
-            &actor,
-            "(Message m-abc direct-designer-operator designer operator ready [])",
-        )
-        .expect("local gate evaluates endpoint");
-
-    assert_eq!(
-        outcome.state(),
-        &DeliveryState::Deferred(DeliveryDeferral::RouterRequired {
-            endpoint: EndpointKind::PtySocket,
-        })
-    );
-}
-
-#[test]
-fn prompt_state_reads_cursor_line_before_cursor() {
-    let state = PromptState::from_cursor_line("> human draft", 13);
-
-    assert_eq!(
-        state,
-        PromptState::Occupied {
-            preview: "human draft".to_string()
-        }
-    );
-}
-
-#[test]
-fn prompt_state_accepts_empty_prompt_prefixes() {
-    assert_eq!(PromptState::from_cursor_line("> ", 2), PromptState::Empty);
-    assert_eq!(PromptState::from_cursor_line("› ", 2), PromptState::Empty);
-}
-
-#[test]
-fn store_filters_messages_by_recipient() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
-    let operator_message =
-        Message::from_nota("(Message m-1 thread-1 operator designer \"for designer\" [])")
-            .expect("operator message decodes");
-    let designer_message =
-        Message::from_nota("(Message m-2 thread-1 designer operator \"for operator\" [])")
-            .expect("designer message decodes");
-
-    store.append(&operator_message).expect("operator append");
-    store.append(&designer_message).expect("designer append");
-
-    let designer_inbox = store
-        .inbox(&ActorId::new("designer"))
-        .expect("designer inbox reads");
-    let operator_inbox = store
-        .inbox(&ActorId::new("operator"))
-        .expect("operator inbox reads");
-
-    assert_eq!(designer_inbox, vec![operator_message]);
-    assert_eq!(operator_inbox, vec![designer_message]);
-}
-
-#[test]
-fn command_line_send_stamps_resolved_sender() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
-    let actor = Actor {
-        name: ActorId::new("operator"),
-        pid: std::process::id(),
-        endpoint: None,
-    };
-    std::fs::write(
-        store.path().actor_index(),
-        actor.to_nota().expect("actor encodes"),
-    )
-    .expect("actor index writes");
-    let command = CommandLine::from_arguments([r#"(Send designer "typed hello")"#]);
-    let mut output = Vec::new();
-
-    command.run(&store, &mut output).expect("message sends");
-    let messages = store.messages().expect("messages read");
-
-    assert_eq!(messages.len(), 1);
-    let id = messages[0].id.view().expect("message id has typed view");
-    assert_eq!(id.kind(), MessageIdKind::Message);
-    assert_eq!(id.short_hash().len(), 3);
-    assert_eq!(messages[0].from.as_str(), "operator");
-    assert_eq!(messages[0].to.as_str(), "designer");
-    assert!(
-        String::from_utf8(output)
-            .expect("output is utf8")
-            .contains("typed hello")
-    );
-}
-
-#[test]
-fn command_line_send_accepts_and_emits_bare_identifier_bodies() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
-    let actor = Actor {
-        name: ActorId::new("operator"),
-        pid: std::process::id(),
-        endpoint: None,
-    };
-    std::fs::write(
-        store.path().actor_index(),
-        actor.to_nota().expect("actor encodes"),
-    )
-    .expect("actor index writes");
-    let command = CommandLine::from_arguments(["(Send designer ready-token)"]);
-    let mut output = Vec::new();
-
-    command.run(&store, &mut output).expect("message sends");
-    let ledger = std::fs::read_to_string(store.path().message_log()).expect("ledger reads");
-
-    assert!(ledger.contains(" ready-token []"));
-    assert!(!ledger.contains("\"ready-token\""));
+    assert_eq!(resolved.as_str(), "operator");
 }
 
 #[test]
 fn command_line_send_routes_signal_frame_without_writing_local_ledger() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store_path = directory.path().join("store");
-    let router_socket = directory.path().join("router.signal.sock");
-    std::fs::create_dir_all(&store_path).expect("store directory");
-    let listener = UnixListener::bind(&router_socket).expect("router socket binds");
-    let message = env!("CARGO_BIN_EXE_message");
-    let start = directory.path().join("start");
-    let shell = Command::new("sh")
-        .arg("-c")
-        .arg(format!(
-            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '(Send designer signal-hello)'",
-            start.display(),
-            message
-        ))
-        .env("PERSONA_MESSAGE_STORE", &store_path)
-        .env("PERSONA_MESSAGE_ROUTER_SOCKET", &router_socket)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("message shell starts");
-    let actor = Actor {
-        name: ActorId::new("operator"),
-        pid: shell.id(),
-        endpoint: None,
-    };
-    std::fs::write(
-        store_path.join("actors.nota"),
-        actor.to_nota().expect("actor encodes"),
-    )
-    .expect("actor index writes");
-
-    let router = std::thread::spawn(move || {
-        std::fs::write(&start, "").expect("start marker writes");
-        let (mut stream, _) = listener.accept().expect("router accepts");
-        let codec = SignalRouterFrameCodec::default();
-        let frame = codec.read_frame(&mut stream).expect("router input reads");
-        let Some(AuthProof::LocalOperator(proof)) = frame.auth() else {
-            panic!("expected local operator auth proof");
-        };
-        assert_eq!(proof.operator(), "operator");
-        let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
-            panic!("expected signal request frame");
-        };
-        assert_eq!(verb, SemaVerb::Assert);
-        let MessageRequest::MessageSubmission(submission) = payload else {
-            panic!("expected message submission");
-        };
-        assert_eq!(submission.recipient.as_str(), "designer");
-        assert_eq!(submission.body.as_str(), "signal-hello");
-        let reply = Frame::new(FrameBody::Reply(Reply::operation(
-            MessageReply::SubmissionAccepted(SubmissionAcceptance {
-                message_slot: MessageSlot::new(7),
-            }),
-        )));
-        codec
-            .write_frame(&mut stream, &reply)
-            .expect("router reply writes");
-        submission
-    });
+    let fixture = ActorIndexFixture::new();
+    let router_socket_path = fixture.router_socket_path();
+    let start_path = fixture.start_path();
+    let fake_router =
+        FakeRouter::bind(&router_socket_path, start_path.clone()).serve(RouterReply::accepted(7));
+    let shell = fixture.spawn_message_after_start(
+        &start_path,
+        Some(&router_socket_path),
+        "(Send designer signal-hello)",
+    );
+    fixture.write_actor("operator", shell.id());
 
     let output = shell.wait_with_output().expect("message shell exits");
-    let submission = router.join().expect("router thread joins");
-    let store = MessageStore::from_path(StorePath::from_path(&store_path));
-    let messages = store.messages().expect("messages read");
+    let recorded = fake_router.join().expect("router thread joins");
     let text = String::from_utf8(output.stdout).expect("output is utf8");
 
     assert!(output.status.success());
+    assert_eq!(recorded.auth_actor, "operator");
+    let MessageRequest::MessageSubmission(submission) = recorded.request else {
+        panic!("expected message submission");
+    };
+    assert_eq!(submission.recipient.as_str(), "designer");
     assert_eq!(submission.body, MessageBody::new("signal-hello"));
     assert!(text.contains("(SubmissionAccepted 7)"));
-    assert!(messages.is_empty());
     assert!(
-        !store.path().message_log().exists(),
-        "signal router path must not create local messages.nota.log"
+        !fixture
+            .store_path()
+            .join(["messages", ".nota.log"].concat())
+            .exists(),
+        "signal router path must not create the retired local ledger"
     );
 }
 
 #[test]
+fn command_line_send_preserves_bare_identifier_body_in_signal_payload() {
+    let fixture = ActorIndexFixture::new();
+    let router_socket_path = fixture.router_socket_path();
+    let start_path = fixture.start_path();
+    let fake_router =
+        FakeRouter::bind(&router_socket_path, start_path.clone()).serve(RouterReply::accepted(8));
+    let shell = fixture.spawn_message_after_start(
+        &start_path,
+        Some(&router_socket_path),
+        "(Send designer ready-token)",
+    );
+    fixture.write_actor("operator", shell.id());
+
+    let output = shell.wait_with_output().expect("message shell exits");
+    let recorded = fake_router.join().expect("router thread joins");
+
+    assert!(output.status.success());
+    let MessageRequest::MessageSubmission(submission) = recorded.request else {
+        panic!("expected message submission");
+    };
+    assert_eq!(submission.body.as_str(), "ready-token");
+}
+
+#[test]
 fn command_line_inbox_routes_signal_frame_without_reading_local_ledger() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store_path = directory.path().join("store");
-    let router_socket = directory.path().join("router.signal.sock");
-    std::fs::create_dir_all(&store_path).expect("store directory");
+    let fixture = ActorIndexFixture::new();
+    let router_socket_path = fixture.router_socket_path();
+    let start_path = fixture.start_path();
     std::fs::write(
-        store_path.join("messages.nota.log"),
+        fixture
+            .store_path()
+            .join(["messages", ".nota.log"].concat()),
         "(Message m-old direct-operator-designer operator designer stale-local [])\n",
     )
     .expect("stale local ledger writes");
-    let listener = UnixListener::bind(&router_socket).expect("router socket binds");
-    let message = env!("CARGO_BIN_EXE_message");
-    let start = directory.path().join("start");
-    let shell = Command::new("sh")
-        .arg("-c")
-        .arg(format!(
-            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '(Inbox designer)'",
-            start.display(),
-            message
-        ))
-        .env("PERSONA_MESSAGE_STORE", &store_path)
-        .env("PERSONA_MESSAGE_ROUTER_SOCKET", &router_socket)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("message shell starts");
-    let actor = Actor {
-        name: ActorId::new("operator"),
-        pid: shell.id(),
-        endpoint: None,
-    };
-    std::fs::write(
-        store_path.join("actors.nota"),
-        actor.to_nota().expect("actor encodes"),
-    )
-    .expect("actor index writes");
-
-    let router = std::thread::spawn(move || {
-        std::fs::write(&start, "").expect("start marker writes");
-        let (mut stream, _) = listener.accept().expect("router accepts");
-        let codec = SignalRouterFrameCodec::default();
-        let frame = codec.read_frame(&mut stream).expect("router input reads");
-        let Some(AuthProof::LocalOperator(proof)) = frame.auth() else {
-            panic!("expected local operator auth proof");
-        };
-        assert_eq!(proof.operator(), "operator");
-        let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
-            panic!("expected signal request frame");
-        };
-        assert_eq!(verb, SemaVerb::Assert);
-        let MessageRequest::InboxQuery(query) = payload else {
-            panic!("expected inbox query");
-        };
-        assert_eq!(query.recipient.as_str(), "designer");
-        let reply = Frame::new(FrameBody::Reply(Reply::operation(
-            MessageReply::InboxListing(InboxListing {
-                messages: vec![InboxEntry {
-                    message_slot: MessageSlot::new(3),
-                    sender: MessageSender::new("operator"),
-                    body: MessageBody::new("router-only"),
-                }],
-            }),
-        )));
-        codec
-            .write_frame(&mut stream, &reply)
-            .expect("router reply writes");
-    });
+    let fake_router = FakeRouter::bind(&router_socket_path, start_path.clone())
+        .serve(RouterReply::inbox("operator", "router-only"));
+    let shell = fixture.spawn_message_after_start(
+        &start_path,
+        Some(&router_socket_path),
+        "(Inbox designer)",
+    );
+    fixture.write_actor("operator", shell.id());
 
     let output = shell.wait_with_output().expect("message shell exits");
-    router.join().expect("router thread joins");
+    let recorded = fake_router.join().expect("router thread joins");
     let text = String::from_utf8(output.stdout).expect("output is utf8");
 
     assert!(output.status.success());
+    let MessageRequest::InboxQuery(query) = recorded.request else {
+        panic!("expected inbox query");
+    };
+    assert_eq!(query.recipient.as_str(), "designer");
     assert!(text.contains("RouterInboxListing"));
     assert!(text.contains("router-only"));
     assert!(!text.contains("stale-local"));
 }
 
 #[test]
-fn command_line_registers_actor_for_current_session() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
-    let command = CommandLine::from_arguments(["(Register operator None)"]);
-    let mut output = Vec::new();
+fn command_line_send_requires_router_socket() {
+    let fixture = ActorIndexFixture::new();
+    let start_path = fixture.start_path();
+    let shell = fixture.spawn_message_after_start(&start_path, None, "(Send designer hello)");
+    fixture.write_actor("operator", shell.id());
+    std::fs::write(&start_path, "").expect("start marker writes");
 
-    command.run(&store, &mut output).expect("actor registers");
+    let output = shell.wait_with_output().expect("message shell exits");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf8");
 
-    let actors = store.actors().expect("actors read");
-    let actor = actors
-        .actor(&ActorId::new("operator"))
-        .expect("registered actor exists");
-    assert!(actor.pid > 0);
-    assert_eq!(actor.endpoint, None);
+    assert!(!output.status.success());
+    assert!(stderr.contains("SignalRouterSocketMissing"));
     assert!(
-        String::from_utf8(output)
-            .expect("output is utf8")
-            .contains("(Registered (Actor operator")
+        !fixture
+            .store_path()
+            .join(["messages", ".nota.log"].concat())
+            .exists()
     );
 }
 
 #[test]
-fn command_line_agents_lists_registered_actors() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
-    store
-        .register(&Actor {
-            name: ActorId::new("operator"),
-            pid: 10,
-            endpoint: None,
-        })
-        .expect("operator registers");
-    store
-        .register(&Actor {
-            name: ActorId::new("designer"),
-            pid: 20,
-            endpoint: None,
-        })
-        .expect("designer registers");
-    let command = CommandLine::from_arguments(["(Agents)"]);
-    let mut output = Vec::new();
-
-    command.run(&store, &mut output).expect("agents list");
-    let text = String::from_utf8(output).expect("output is utf8");
-
-    assert!(text.contains("(KnownActors ["));
-    assert!(text.contains("(Actor operator 10 None)"));
-    assert!(text.contains("(Actor designer 20 None)"));
-}
-
-#[test]
-fn register_replaces_existing_actor_endpoint() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
-    store
-        .register(&Actor {
-            name: ActorId::new("operator"),
-            pid: 10,
-            endpoint: None,
-        })
-        .expect("operator registers first");
-    let replacement = Actor {
-        name: ActorId::new("operator"),
-        pid: 11,
-        endpoint: Some(EndpointTransport {
-            kind: EndpointKind::Human,
-            target: "operator".to_string(),
-            aux: None,
-        }),
-    };
-
-    store.register(&replacement).expect("operator replaces");
-    let actors = store.actors().expect("actors read");
-
-    assert_eq!(actors.actors().len(), 1);
-    assert_eq!(actors.actor(&ActorId::new("operator")), Some(&replacement));
-}
-
-#[test]
 fn command_line_takes_exactly_one_argument() {
-    let directory = tempfile::tempdir().expect("temporary directory");
-    let store = MessageStore::from_path(StorePath::from_path(directory.path()));
+    let actor_index_path = ActorIndexPath::from_path("/tmp/nonexistent-actors.nota");
     let command = CommandLine::from_arguments(["(Inbox", "designer)"]);
     let mut output = Vec::new();
 
     let error = command
-        .run(&store, &mut output)
+        .run(&actor_index_path, &mut output)
         .expect_err("split nota is rejected");
 
     assert!(
@@ -505,8 +331,13 @@ fn command_line_takes_exactly_one_argument() {
 
 #[test]
 fn input_rejects_unknown_record_heads() {
-    let error = Input::from_nota("(Bead message operator designer \"legacy\")")
-        .expect_err("bead is not persona message input");
+    let error = Input::from_nota("(Bead)").expect_err("unknown input is rejected");
 
-    assert!(error.to_string().contains("Bead"));
+    match error {
+        persona_message::Error::Nota(Error::UnknownKindForVerb { verb, got }) => {
+            assert_eq!(verb, "Input");
+            assert_eq!(got, "Bead");
+        }
+        other => panic!("expected unknown input kind, got {other:?}"),
+    }
 }

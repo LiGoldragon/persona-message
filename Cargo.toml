@@ -5,7 +5,7 @@ edition      = "2024"
 rust-version = "1.88"
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/LiGoldragon/persona-message"
-description  = "Persona NOTA message CLI and prototype ledger."
+description  = "Persona NOTA message CLI and router proxy."
 
 [lib]
 name = "persona_message"
@@ -15,18 +15,12 @@ path = "src/lib.rs"
 name = "message"
 path = "src/main.rs"
 
-[[bin]]
-name = "message-daemon"
-path = "src/bin/message-daemon.rs"
-
 [dependencies]
-kameo           = { version = "0.20", default-features = false, features = ["macros", "tracing"] }
 nota-codec      = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
 rkyv            = "0.8"
 signal-core     = { git = "https://github.com/LiGoldragon/signal-core.git" }
 signal-persona-message = { git = "https://github.com/LiGoldragon/signal-persona-message.git" }
 thiserror       = "2"
-tokio           = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 tempfile = "3"
