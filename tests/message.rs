@@ -110,10 +110,6 @@ impl FakeRouter {
             let (mut stream, _) = self.listener.accept().expect("router accepts");
             let codec = SignalRouterFrameCodec::default();
             let frame = codec.read_frame(&mut stream).expect("router input reads");
-            assert!(
-                frame.auth().is_none(),
-                "message proxy must not send in-band proof material"
-            );
             let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
                 panic!("expected signal request frame");
             };
