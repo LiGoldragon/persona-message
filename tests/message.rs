@@ -2,10 +2,16 @@ use nota_codec::Error;
 use persona_message::command::{CommandLine, Input};
 use persona_message::delivery::PromptState;
 use persona_message::resolver::{ActorIndex, ProcessAncestry};
+use persona_message::router::SignalRouterFrameCodec;
 use persona_message::schema::{
     Actor, ActorId, EndpointKind, EndpointTransport, Message, MessageIdKind,
 };
 use persona_message::store::{MessageStore, StorePath};
+use signal_core::{FrameBody, Reply, Request, SemaVerb};
+use signal_persona_message::{
+    Frame, InboxEntry, InboxListing, MessageBody, MessageReply, MessageRequest, MessageSender,
+    MessageSlot, SubmissionAcceptance,
+};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::process::{Command, Stdio};
@@ -275,6 +281,135 @@ fn command_line_send_can_route_through_persona_router() {
     assert_eq!(messages[0].from.as_str(), "operator");
     assert_eq!(messages[0].to.as_str(), "designer");
     assert_eq!(messages[0].body.as_str(), "router-hello");
+}
+
+#[test]
+fn command_line_send_routes_signal_frame_without_writing_local_ledger() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store_path = directory.path().join("store");
+    let router_socket = directory.path().join("router.signal.sock");
+    std::fs::create_dir_all(&store_path).expect("store directory");
+    let listener = UnixListener::bind(&router_socket).expect("router socket binds");
+    let message = env!("CARGO_BIN_EXE_message");
+    let start = directory.path().join("start");
+    let shell = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '(Send designer signal-hello)'",
+            start.display(),
+            message
+        ))
+        .env("PERSONA_MESSAGE_STORE", &store_path)
+        .env("PERSONA_MESSAGE_ROUTER_SOCKET", &router_socket)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("message shell starts");
+
+    let router = std::thread::spawn(move || {
+        std::fs::write(&start, "").expect("start marker writes");
+        let (mut stream, _) = listener.accept().expect("router accepts");
+        let codec = SignalRouterFrameCodec::default();
+        let frame = codec.read_frame(&mut stream).expect("router input reads");
+        let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
+            panic!("expected signal request frame");
+        };
+        assert_eq!(verb, SemaVerb::Assert);
+        let MessageRequest::MessageSubmission(submission) = payload else {
+            panic!("expected message submission");
+        };
+        assert_eq!(submission.recipient.as_str(), "designer");
+        assert_eq!(submission.body.as_str(), "signal-hello");
+        let reply = Frame::new(FrameBody::Reply(Reply::operation(
+            MessageReply::SubmissionAccepted(SubmissionAcceptance {
+                message_slot: MessageSlot::new(7),
+            }),
+        )));
+        codec
+            .write_frame(&mut stream, &reply)
+            .expect("router reply writes");
+        submission
+    });
+
+    let output = shell.wait_with_output().expect("message shell exits");
+    let submission = router.join().expect("router thread joins");
+    let store = MessageStore::from_path(StorePath::from_path(&store_path));
+    let messages = store.messages().expect("messages read");
+    let text = String::from_utf8(output.stdout).expect("output is utf8");
+
+    assert!(output.status.success());
+    assert_eq!(submission.body, MessageBody::new("signal-hello"));
+    assert!(text.contains("(SubmissionAccepted 7)"));
+    assert!(messages.is_empty());
+    assert!(
+        !store.path().message_log().exists(),
+        "signal router path must not create local messages.nota.log"
+    );
+}
+
+#[test]
+fn command_line_inbox_routes_signal_frame_without_reading_local_ledger() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let store_path = directory.path().join("store");
+    let router_socket = directory.path().join("router.signal.sock");
+    std::fs::create_dir_all(&store_path).expect("store directory");
+    std::fs::write(
+        store_path.join("messages.nota.log"),
+        "(Message m-old direct-operator-designer operator designer stale-local [])\n",
+    )
+    .expect("stale local ledger writes");
+    let listener = UnixListener::bind(&router_socket).expect("router socket binds");
+    let message = env!("CARGO_BIN_EXE_message");
+    let start = directory.path().join("start");
+    let shell = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '(Inbox designer)'",
+            start.display(),
+            message
+        ))
+        .env("PERSONA_MESSAGE_STORE", &store_path)
+        .env("PERSONA_MESSAGE_ROUTER_SOCKET", &router_socket)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("message shell starts");
+
+    let router = std::thread::spawn(move || {
+        std::fs::write(&start, "").expect("start marker writes");
+        let (mut stream, _) = listener.accept().expect("router accepts");
+        let codec = SignalRouterFrameCodec::default();
+        let frame = codec.read_frame(&mut stream).expect("router input reads");
+        let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
+            panic!("expected signal request frame");
+        };
+        assert_eq!(verb, SemaVerb::Assert);
+        let MessageRequest::InboxQuery(query) = payload else {
+            panic!("expected inbox query");
+        };
+        assert_eq!(query.recipient.as_str(), "designer");
+        let reply = Frame::new(FrameBody::Reply(Reply::operation(
+            MessageReply::InboxListing(InboxListing {
+                messages: vec![InboxEntry {
+                    message_slot: MessageSlot::new(3),
+                    sender: MessageSender::new("operator"),
+                    body: MessageBody::new("router-only"),
+                }],
+            }),
+        )));
+        codec
+            .write_frame(&mut stream, &reply)
+            .expect("router reply writes");
+    });
+
+    let output = shell.wait_with_output().expect("message shell exits");
+    router.join().expect("router thread joins");
+    let text = String::from_utf8(output.stdout).expect("output is utf8");
+
+    assert!(output.status.success());
+    assert!(text.contains("RouterInboxListing"));
+    assert!(text.contains("router-only"));
+    assert!(!text.contains("stale-local"));
 }
 
 #[test]

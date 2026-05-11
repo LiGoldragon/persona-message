@@ -16,6 +16,9 @@ pub enum Error {
     #[error("system: {0}")]
     System(#[from] persona_system::Error),
 
+    #[error("signal frame: {0}")]
+    SignalFrame(#[from] signal_core::FrameError),
+
     #[error("inline Nota argument must be UTF-8: {got:?}")]
     InvalidInlineNotaArgument { got: String },
 
@@ -74,6 +77,9 @@ pub enum Error {
 
     #[error("router response was empty")]
     RouterResponseEmpty,
+
+    #[error("router reply was not valid for this command: {got}")]
+    UnexpectedRouterReply { got: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

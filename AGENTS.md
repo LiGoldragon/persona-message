@@ -5,21 +5,22 @@ orchestration protocol before editing this repository.
 
 ## Repo Role
 
-Persona Message is the typed message contract and first shim for
-harness-to-harness communication. It owns the NOTA records that prove a message,
-authorization, or delivery can cross a harness boundary without becoming a
-stringly-typed bead.
+Persona Message is the `message` CLI and text projection boundary for
+harness-to-harness communication. It owns the NOTA convenience surface used by
+humans and harnesses, then proxies router-bound operations into the
+`signal-persona-message` contract.
 
 ## Current Phase
 
-This repo is in contract-prototype phase. Keep the implementation narrow:
+This repo is in router-proxy transition phase. Keep the implementation narrow:
 
-- NOTA data types for `Agent` and `Message`.
-- A `message` binary that decodes `Send`, `Inbox`, and `Tail`, resolves sender
-  identity from process ancestry, writes canonical NOTA lines, and reads
-  recipient inboxes from the prototype store.
-- Tests that show two named agents can communicate through the typed file
-  ledger.
+- A `message` binary that decodes one NOTA input record.
+- `Send` and `Inbox` proxy to `persona-router` as length-prefixed
+  `signal-persona-message` frames when `PERSONA_MESSAGE_ROUTER_SOCKET` is set.
+- The Signal router path must not append to the transitional local ledger.
+- The local ledger, `message-daemon`, `Register`, `Agents`, `Tail`, and
+  `PERSONA_ROUTER_SOCKET` line protocol remain compatibility scaffolding for
+  older visible harness tests.
 
 BEADS is transitional workspace coordination. Do not add a BEADS bridge here;
 Persona's typed fabric is intended to absorb that role later.

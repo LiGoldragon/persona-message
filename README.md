@@ -1,18 +1,28 @@
 # Persona Message
 
-`persona-message` is Persona's human-facing message CLI and transitional ledger.
-The `message` binary accepts one NOTA input record, decodes it through Rust
-types, and stores canonical `Message` records in a local development ledger.
-When `message-daemon` is used, daemon requests pass through a Kameo
-`DaemonRoot`, then through its supervised `Ledger` child before touching that
-ledger.
+`persona-message` is Persona's human-facing message CLI and router proxy. The
+`message` binary accepts one NOTA input record, decodes it through Rust types,
+and, when `PERSONA_MESSAGE_ROUTER_SOCKET` is set, sends a length-prefixed
+`signal-persona-message` frame to `persona-router`.
 
 The message binary contract belongs to `signal-persona-message`. This
 repository remains useful as the text boundary for harnesses and humans: NOTA
 in, typed validation, NOTA projection out.
 
-The first harness-to-harness path is deliberately small. A harness registers
-the process identity that should own its outbound messages:
+The target send path is:
+
+```sh
+PERSONA_MESSAGE_ROUTER_SOCKET=/run/persona/router.sock \
+  message '(Send designer "Need a layout pass.")'
+```
+
+That path returns a NOTA projection of the router's typed reply, such as
+`(SubmissionAccepted 7)`, and does not write `messages.nota.log`. Durable
+message acceptance and delivery state belong to `persona-router`.
+
+The old local ledger remains as a development fallback for early
+harness-to-harness tests. A harness registers the process identity that should
+own its outbound legacy messages:
 
 ```sh
 PERSONA_MESSAGE_STORE=.message message '(Register operator None)'
@@ -62,8 +72,8 @@ routes one message while the responder window is focused, then routes another
 while the responder prompt contains a human draft. Both messages remain pending
 until pushed focus or prompt observations make delivery safe.
 
-The visible Pi router-relay test exercises trained harness messaging through
-the router:
+The visible Pi router-relay test still exercises trained harness messaging
+through the legacy router-line compatibility path:
 
 ```sh
 nix run .#test-pty-pi-router-relay
@@ -74,7 +84,8 @@ operator instruction through `message '(Send initiator ...)'`, then expects the
 agents to use `message` themselves: initiator messages responder, responder
 replies to initiator, and initiator reports completion to operator. The same
 run also verifies focus and prompt guards before releasing queued deliveries
-through pushed observations.
+through pushed observations. This compatibility path uses `PERSONA_ROUTER_SOCKET`
+until `persona-router` accepts `signal-persona-message` frames directly.
 
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through relation-specific typed

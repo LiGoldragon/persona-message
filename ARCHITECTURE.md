@@ -2,10 +2,10 @@
 
 *Human and harness NOTA boundary for Persona messages.*
 
-`persona-message` owns the `message` CLI and the transitional message ledger
-used while the router and durable state are being assembled. It validates NOTA input
-from a human or harness, resolves sender identity from the running process, and
-projects typed message records back to NOTA.
+`persona-message` owns the `message` CLI and the transitional human/harness
+projection surface for Persona messages. It validates one NOTA input record,
+converts router-bound message operations into `signal-persona-message` frames,
+and projects typed router replies back to NOTA.
 
 > **Scope.** Any "sema" reference in this doc means today's `sema`
 > library (rename pending → `sema-db`). The eventual `Sema` is
@@ -16,20 +16,21 @@ projects typed message records back to NOTA.
 
 ## 0 · TL;DR
 
-This repo is the text boundary, not the binary contract. Component-to-component
-traffic uses `signal-persona-message`; durable assembled state belongs to the
-router-owned Sema layer over the `sema` library.
+This repo is the text boundary and proxy, not the durable message ledger.
+Component-to-component traffic uses `signal-persona-message`; durable assembled
+state belongs to the router-owned Sema layer over the `sema` library.
 
 ```mermaid
 flowchart LR
     "human or harness" -->|"NOTA Send"| "message CLI"
-    "message CLI" -->|"Register"| "actors.nota"
-    "actors.nota" -->|"process ancestry"| "message CLI"
-    "message CLI" -->|"typed validation"| "DaemonRoot"
-    "DaemonRoot" -->|"store intent"| "Ledger"
-    "Ledger" -->|"serialized writes"| "local message ledger"
-    "message CLI" -->|"Frame request"| "signal-persona-message"
-    "persona-router" -->|"pre-harness NOTA projection"| "message CLI"
+    "message CLI" -->|"MessageSubmission frame"| "signal-persona-message"
+    "signal-persona-message" -->|"length-prefixed rkyv"| "persona-router"
+    "persona-router" -->|"MessageReply frame"| "message CLI"
+    "message CLI" -->|"NOTA reply"| "human or harness"
+
+    "message CLI" -. "legacy fallback" .-> "message-daemon"
+    "message-daemon" -. "Kameo mailbox" .-> "Ledger"
+    "Ledger" -. "transitional only" .-> "messages.nota.log"
 ```
 
 ## 1 · Component Surface
@@ -37,22 +38,30 @@ flowchart LR
 `persona-message` exposes:
 
 - `message` CLI for NOTA input/output;
+- Signal-frame router proxying through `PERSONA_MESSAGE_ROUTER_SOCKET`;
 - `message-daemon` as the transitional daemon surface;
 - a Kameo `DaemonRoot` that owns daemon request intake;
 - a supervised Kameo `Ledger` child that owns transitional ledger reads and
   writes behind the root;
 - local actor resolution from process ancestry;
 - actor registration and listing through `Register` and `Agents`;
-- local append/read surfaces for message tests;
+- local append/read surfaces for legacy message tests;
 - stateful harness scripts exposed through Nix apps.
 
 ## 2 · State and Ownership
 
-The current local ledger is development state. It keeps harness-to-harness tests
+The target `Send` and `Inbox` path is `message` → `signal-persona-message` →
+`persona-router`. When `PERSONA_MESSAGE_ROUTER_SOCKET` is set, `message`
+encodes a length-prefixed Signal frame, waits for one Signal reply frame, and
+prints one NOTA projection of that reply. That path must not append to
+`messages.nota.log`; the router is the durable owner.
+
+The current local ledger is development state. It keeps older harness tests
 usable before `persona-router` fully owns delivery and router-scoped durable
-commits. While the daemon is running, client requests enter through
-`DaemonRoot`. Ledger reads and writes then cross into the supervised `Ledger`,
-so the root coordinates daemon requests and the ledger owns the mutation plane.
+commits. While the transitional daemon is running, client requests enter
+through `DaemonRoot`. Ledger reads and writes then cross into the supervised
+`Ledger`, so the root coordinates daemon requests and the ledger owns the
+mutation plane.
 
 In the assembled runtime:
 
@@ -67,7 +76,9 @@ In the assembled runtime:
 This repo owns:
 
 - NOTA `Register`, `Agents`, `Send`, `Inbox`, and `Tail` CLI surfaces;
-- sender resolution from process ancestry;
+- proxying `Send` and `Inbox` to `persona-router` as
+  `signal-persona-message` frames;
+- sender resolution from process ancestry for the legacy local path;
 - human/harness message projection;
 - stateful real-harness test scripts.
 
@@ -85,6 +96,13 @@ This repo does not own:
 - Agents register their local process identity before sending; ad hoc
   `actors.nota` edits are a fallback for debugging, not the normal path.
 - NOTA input is decoded into typed Rust before it affects state.
+- With `PERSONA_MESSAGE_ROUTER_SOCKET`, `Send` and `Inbox` use
+  `signal-persona-message` length-prefixed rkyv frames.
+- The Signal router path never writes `messages.nota.log`; durable message
+  acceptance belongs to `persona-router`.
+- `PERSONA_ROUTER_SOCKET` is a legacy line-protocol compatibility path for the
+  existing visible harness scripts until `persona-router` accepts
+  `signal-persona-message` frames directly.
 - Daemon requests touch the transitional ledger only through Kameo mailboxes:
   `DaemonRoot` first, supervised `Ledger` second.
 - Kameo messages are data-bearing; empty marker messages are forbidden for
@@ -102,6 +120,7 @@ src/bin/message-daemon.rs
 src/actors/            Kameo actor planes
 src/schema.rs          NOTA-facing records
 src/resolver.rs        process ancestry sender resolution
+src/router.rs          Signal router client plus legacy router-line client
 src/store.rs           transitional local ledger
 src/daemon.rs          transitional daemon surface and daemon root actor
 scripts/               repeatable stateful harness workflows

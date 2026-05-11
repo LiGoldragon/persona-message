@@ -4,10 +4,15 @@ use std::path::PathBuf;
 
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use signal_persona_message::{
+    InboxQuery as SignalInboxQuery, MessageBody as SignalMessageBody,
+    MessageRecipient as SignalMessageRecipient, MessageReply, MessageRequest, MessageSubmission,
+    SubmissionRejectionReason as SignalSubmissionRejectionReason,
+};
 
 use crate::daemon::{DaemonSocket, MessageDaemonClient};
 use crate::error::{Error, Result};
-use crate::router::RouterSocket;
+use crate::router::{RouterSocket, SignalRouterSocket};
 use crate::schema::{Actor, ActorId, EndpointTransport, Message, MessageId, ThreadId, expect_end};
 use crate::store::MessageStore;
 
@@ -99,7 +104,7 @@ impl Input {
         }
     }
 
-    pub fn run(self, store: &MessageStore, mut output: impl Write) -> Result<()> {
+    pub fn run(mut self, store: &MessageStore, mut output: impl Write) -> Result<()> {
         if matches!(&self, Self::Tail(_)) {
             let recipient = store.resolve_sender()?;
             return store.tail(&recipient, output);
@@ -108,6 +113,23 @@ impl Input {
             let response = MessageDaemonClient::from_socket(socket).submit(self)?;
             write!(output, "{response}")?;
             return Ok(());
+        }
+        if let Some(socket) = SignalRouterSocket::from_environment() {
+            match self {
+                Self::Send(send) => {
+                    let reply = socket.client().submit(send.into_message_request())?;
+                    writeln!(output, "{}", Output::from_router_reply(reply)?.to_nota()?)?;
+                    return Ok(());
+                }
+                Self::Inbox(inbox) => {
+                    let reply = socket.client().submit(inbox.into_message_request())?;
+                    writeln!(output, "{}", Output::from_router_reply(reply)?.to_nota()?)?;
+                    return Ok(());
+                }
+                other => {
+                    self = other;
+                }
+            }
         }
         if let Some(socket) = RouterSocket::from_environment() {
             if let Self::Send(send) = self.clone() {
@@ -156,6 +178,21 @@ impl Send {
             body: self.body,
             attachments: Vec::new(),
         }
+    }
+
+    pub fn into_message_request(self) -> MessageRequest {
+        MessageRequest::MessageSubmission(MessageSubmission {
+            recipient: SignalMessageRecipient::new(self.recipient.as_str()),
+            body: SignalMessageBody::new(self.body),
+        })
+    }
+}
+
+impl Inbox {
+    pub fn into_message_request(self) -> MessageRequest {
+        MessageRequest::InboxQuery(SignalInboxQuery {
+            recipient: SignalMessageRecipient::new(self.recipient.as_str()),
+        })
     }
 }
 
@@ -217,6 +254,34 @@ pub struct Flushed {
     pub deferred: u64,
 }
 
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct SubmissionAccepted {
+    pub message_slot: u64,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct SubmissionRejected {
+    pub reason: SubmissionRejectionReason,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum SubmissionRejectionReason {
+    StoreRejected,
+    RecipientNotFound,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct RouterInboxListing {
+    pub messages: Vec<RouterInboxEntry>,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct RouterInboxEntry {
+    pub message_slot: u64,
+    pub sender: ActorId,
+    pub body: String,
+}
+
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Output {
     Accepted(Accepted),
@@ -224,6 +289,9 @@ pub enum Output {
     Registered(Registered),
     KnownActors(KnownActors),
     Flushed(Flushed),
+    SubmissionAccepted(SubmissionAccepted),
+    SubmissionRejected(SubmissionRejected),
+    RouterInboxListing(RouterInboxListing),
 }
 
 impl Output {
@@ -231,6 +299,30 @@ impl Output {
         let mut encoder = Encoder::new();
         self.encode(&mut encoder)?;
         Ok(encoder.into_string())
+    }
+
+    pub fn from_router_reply(reply: MessageReply) -> Result<Self> {
+        match reply {
+            MessageReply::SubmissionAccepted(acceptance) => {
+                Ok(Self::SubmissionAccepted(SubmissionAccepted {
+                    message_slot: acceptance.message_slot.into_u64(),
+                }))
+            }
+            MessageReply::SubmissionRejected(rejection) => {
+                Ok(Self::SubmissionRejected(SubmissionRejected {
+                    reason: SubmissionRejectionReason::from_signal(rejection.reason),
+                }))
+            }
+            MessageReply::InboxListing(listing) => {
+                Ok(Self::RouterInboxListing(RouterInboxListing {
+                    messages: listing
+                        .messages
+                        .into_iter()
+                        .map(RouterInboxEntry::from_signal)
+                        .collect(),
+                }))
+            }
+        }
     }
 }
 
@@ -242,6 +334,50 @@ impl NotaEncode for Output {
             Self::Registered(output) => output.encode(encoder),
             Self::KnownActors(output) => output.encode(encoder),
             Self::Flushed(output) => output.encode(encoder),
+            Self::SubmissionAccepted(output) => output.encode(encoder),
+            Self::SubmissionRejected(output) => output.encode(encoder),
+            Self::RouterInboxListing(output) => output.encode(encoder),
+        }
+    }
+}
+
+impl SubmissionRejectionReason {
+    fn from_signal(reason: SignalSubmissionRejectionReason) -> Self {
+        match reason {
+            SignalSubmissionRejectionReason::StoreRejected => Self::StoreRejected,
+            SignalSubmissionRejectionReason::RecipientNotFound => Self::RecipientNotFound,
+        }
+    }
+}
+
+impl NotaEncode for SubmissionRejectionReason {
+    fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
+        match self {
+            Self::StoreRejected => "StoreRejected".to_string().encode(encoder),
+            Self::RecipientNotFound => "RecipientNotFound".to_string().encode(encoder),
+        }
+    }
+}
+
+impl NotaDecode for SubmissionRejectionReason {
+    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
+        match String::decode(decoder)?.as_str() {
+            "StoreRejected" => Ok(Self::StoreRejected),
+            "RecipientNotFound" => Ok(Self::RecipientNotFound),
+            other => Err(nota_codec::Error::UnknownKindForVerb {
+                verb: "SubmissionRejectionReason",
+                got: other.to_string(),
+            }),
+        }
+    }
+}
+
+impl RouterInboxEntry {
+    fn from_signal(entry: signal_persona_message::InboxEntry) -> Self {
+        Self {
+            message_slot: entry.message_slot.into_u64(),
+            sender: ActorId::new(entry.sender.as_str()),
+            body: entry.body.as_str().to_string(),
         }
     }
 }

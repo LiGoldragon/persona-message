@@ -7,8 +7,14 @@ Rules for work here:
 
 - Keep the repo at the human/harness text boundary. Message binary records
   belong in `signal-persona-message`.
+- Treat `PERSONA_MESSAGE_ROUTER_SOCKET` as the target router path: `message`
+  sends length-prefixed rkyv Signal frames and prints one NOTA reply projection.
+- The target router path must not write `messages.nota.log`; router-owned Sema
+  tables are the durable message owner.
 - Keep sender identity resolved by process ancestry and actor registration; do
-  not trust sender fields written by a model.
+  not trust sender fields written by a model. In the Signal router path, sender
+  identity is a router responsibility; do not add a sender field to
+  `MessageSubmission`.
 - Use `Register` and `Agents` for normal local actor setup and inspection.
   Hand-edit `actors.nota` only when debugging the resolver itself.
 - Keep stateful harness workflows named under `scripts/` and exposed by
@@ -31,12 +37,13 @@ Rules for work here:
   observations arrive.
 - Use `scripts/test-pty-pi-router-relay` when validating that trained Pi
   harnesses can use `message '(Send ...)'` themselves while the message CLI
-  routes through `persona-router`.
+  routes through the current legacy `PERSONA_ROUTER_SOCKET` line protocol.
 - Use `scripts/debug-pty-pi-router-relay-state` for relay diagnostics. Do not
   inspect relay state with one-off shell capture commands; keep the diagnostic
   path named and exposed through Nix.
-- Treat the local ledger as transitional development state. Do not deepen it
-  into the final database surface.
+- Treat the local ledger and `PERSONA_ROUTER_SOCKET` line protocol as
+  transitional development state. Do not deepen either into the final database
+  or router protocol surface.
 
 Use component-to-component rkyv frames through relation-specific Signal
 contracts when the CLI or daemon crosses into router/store territory. Use NOTA
