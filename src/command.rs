@@ -117,12 +117,18 @@ impl Input {
         if let Some(socket) = SignalRouterSocket::from_environment() {
             match self {
                 Self::Send(send) => {
-                    let reply = socket.client().submit(send.into_message_request())?;
+                    let sender = store.resolve_sender()?;
+                    let reply = socket
+                        .client()
+                        .submit(&sender, send.into_message_request())?;
                     writeln!(output, "{}", Output::from_router_reply(reply)?.to_nota()?)?;
                     return Ok(());
                 }
                 Self::Inbox(inbox) => {
-                    let reply = socket.client().submit(inbox.into_message_request())?;
+                    let sender = store.resolve_sender()?;
+                    let reply = socket
+                        .client()
+                        .submit(&sender, inbox.into_message_request())?;
                     writeln!(output, "{}", Output::from_router_reply(reply)?.to_nota()?)?;
                     return Ok(());
                 }

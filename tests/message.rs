@@ -7,7 +7,7 @@ use persona_message::schema::{
     Actor, ActorId, EndpointKind, EndpointTransport, Message, MessageIdKind,
 };
 use persona_message::store::{MessageStore, StorePath};
-use signal_core::{FrameBody, Reply, Request, SemaVerb};
+use signal_core::{AuthProof, FrameBody, Reply, Request, SemaVerb};
 use signal_persona_message::{
     Frame, InboxEntry, InboxListing, MessageBody, MessageReply, MessageRequest, MessageSender,
     MessageSlot, SubmissionAcceptance,
@@ -305,12 +305,26 @@ fn command_line_send_routes_signal_frame_without_writing_local_ledger() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("message shell starts");
+    let actor = Actor {
+        name: ActorId::new("operator"),
+        pid: shell.id(),
+        endpoint: None,
+    };
+    std::fs::write(
+        store_path.join("actors.nota"),
+        actor.to_nota().expect("actor encodes"),
+    )
+    .expect("actor index writes");
 
     let router = std::thread::spawn(move || {
         std::fs::write(&start, "").expect("start marker writes");
         let (mut stream, _) = listener.accept().expect("router accepts");
         let codec = SignalRouterFrameCodec::default();
         let frame = codec.read_frame(&mut stream).expect("router input reads");
+        let Some(AuthProof::LocalOperator(proof)) = frame.auth() else {
+            panic!("expected local operator auth proof");
+        };
+        assert_eq!(proof.operator(), "operator");
         let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
             panic!("expected signal request frame");
         };
@@ -374,12 +388,26 @@ fn command_line_inbox_routes_signal_frame_without_reading_local_ledger() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("message shell starts");
+    let actor = Actor {
+        name: ActorId::new("operator"),
+        pid: shell.id(),
+        endpoint: None,
+    };
+    std::fs::write(
+        store_path.join("actors.nota"),
+        actor.to_nota().expect("actor encodes"),
+    )
+    .expect("actor index writes");
 
     let router = std::thread::spawn(move || {
         std::fs::write(&start, "").expect("start marker writes");
         let (mut stream, _) = listener.accept().expect("router accepts");
         let codec = SignalRouterFrameCodec::default();
         let frame = codec.read_frame(&mut stream).expect("router input reads");
+        let Some(AuthProof::LocalOperator(proof)) = frame.auth() else {
+            panic!("expected local operator auth proof");
+        };
+        assert_eq!(proof.operator(), "operator");
         let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
             panic!("expected signal request frame");
         };

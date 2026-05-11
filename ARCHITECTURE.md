@@ -54,7 +54,9 @@ The target `Send` and `Inbox` path is `message` → `signal-persona-message` →
 `persona-router`. When `PERSONA_MESSAGE_ROUTER_SOCKET` is set, `message`
 encodes a length-prefixed Signal frame, waits for one Signal reply frame, and
 prints one NOTA projection of that reply. That path must not append to
-`messages.nota.log`; the router is the durable owner.
+`messages.nota.log`; the router is the durable owner. The CLI resolves the
+caller from process ancestry and carries it as Signal auth. The
+`MessageSubmission` payload remains sender-free.
 
 The current local ledger is development state. It keeps older harness tests
 usable before `persona-router` fully owns delivery and router-scoped durable
@@ -78,7 +80,8 @@ This repo owns:
 - NOTA `Register`, `Agents`, `Send`, `Inbox`, and `Tail` CLI surfaces;
 - proxying `Send` and `Inbox` to `persona-router` as
   `signal-persona-message` frames;
-- sender resolution from process ancestry for the legacy local path;
+- sender resolution from process ancestry for Signal auth and for the legacy
+  local path;
 - human/harness message projection;
 - stateful real-harness test scripts.
 
@@ -98,6 +101,8 @@ This repo does not own:
 - NOTA input is decoded into typed Rust before it affects state.
 - With `PERSONA_MESSAGE_ROUTER_SOCKET`, `Send` and `Inbox` use
   `signal-persona-message` length-prefixed rkyv frames.
+- The caller identity in the Signal path is auth, not a field in
+  `MessageSubmission`.
 - The Signal router path never writes `messages.nota.log`; durable message
   acceptance belongs to `persona-router`.
 - `PERSONA_ROUTER_SOCKET` is a legacy line-protocol compatibility path for the

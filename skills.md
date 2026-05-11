@@ -12,8 +12,8 @@ Rules for work here:
 - The target router path must not write `messages.nota.log`; router-owned Sema
   tables are the durable message owner.
 - Keep sender identity resolved by process ancestry and actor registration; do
-  not trust sender fields written by a model. In the Signal router path, sender
-  identity is a router responsibility; do not add a sender field to
+  not trust sender fields written by a model. In the Signal router path, attach
+  the resolved caller as Signal auth; do not add a sender field to
   `MessageSubmission`.
 - Use `Register` and `Agents` for normal local actor setup and inspection.
   Hand-edit `actors.nota` only when debugging the resolver itself.

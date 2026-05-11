@@ -2,11 +2,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
-use signal_core::{FrameBody, Request};
+use signal_core::{AuthProof, FrameBody, LocalOperatorProof, Request};
 use signal_persona_message::{Frame, MessageReply, MessageRequest};
 
 use crate::error::{Error, Result};
-use crate::schema::Message;
+use crate::schema::{ActorId, Message};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalRouterSocket {
@@ -41,9 +41,9 @@ impl SignalRouterClient {
         }
     }
 
-    pub fn submit(&self, request: MessageRequest) -> Result<MessageReply> {
+    pub fn submit(&self, sender: &ActorId, request: MessageRequest) -> Result<MessageReply> {
         let mut stream = UnixStream::connect(&self.socket.path)?;
-        let frame = self.codec.request_frame(request);
+        let frame = self.codec.request_frame(sender, request);
         self.codec.write_frame(&mut stream, &frame)?;
         let reply = self.codec.read_frame(&mut stream)?;
         self.codec.reply_from_frame(reply)
@@ -83,8 +83,10 @@ impl SignalRouterFrameCodec {
         Ok(())
     }
 
-    pub fn request_frame(&self, request: MessageRequest) -> Frame {
-        Frame::new(FrameBody::Request(Request::assert(request)))
+    pub fn request_frame(&self, sender: &ActorId, request: MessageRequest) -> Frame {
+        Frame::new(FrameBody::Request(Request::assert(request))).with_auth(
+            AuthProof::LocalOperator(LocalOperatorProof::new(sender.as_str())),
+        )
     }
 
     pub fn reply_from_frame(&self, frame: Frame) -> Result<MessageReply> {

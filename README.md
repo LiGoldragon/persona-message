@@ -12,13 +12,18 @@ in, typed validation, NOTA projection out.
 The target send path is:
 
 ```sh
+PERSONA_MESSAGE_STORE=.message message '(Register operator None)'
 PERSONA_MESSAGE_ROUTER_SOCKET=/run/persona/router.sock \
+PERSONA_MESSAGE_STORE=.message \
   message '(Send designer "Need a layout pass.")'
 ```
 
 That path returns a NOTA projection of the router's typed reply, such as
 `(SubmissionAccepted 7)`, and does not write `messages.nota.log`. Durable
-message acceptance and delivery state belong to `persona-router`.
+message acceptance and delivery state belong to `persona-router`. Registration
+still matters: `message` resolves the caller from process ancestry and attaches
+that identity as Signal auth. The `MessageSubmission` payload itself does not
+contain a sender field.
 
 The old local ledger remains as a development fallback for early
 harness-to-harness tests. A harness registers the process identity that should
