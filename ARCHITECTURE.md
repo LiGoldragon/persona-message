@@ -7,6 +7,11 @@ used while the router and durable state are being assembled. It validates NOTA i
 from a human or harness, resolves sender identity from the running process, and
 projects typed message records back to NOTA.
 
+> **Scope.** Any "sema" reference in this doc means today's `sema`
+> library (rename pending → `sema-db`). The eventual `Sema` is
+> broader; today's persona-message is a realization step. See
+> `~/primary/ESSENCE.md` §"Today and eventually".
+
 ---
 
 ## 0 · TL;DR
