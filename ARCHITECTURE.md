@@ -135,4 +135,4 @@ tests/                 CLI, daemon, actor-runtime, two-process, and harness test
 - `../signal-persona-message/ARCHITECTURE.md`
 - `../persona-router/ARCHITECTURE.md`
 - `../sema/ARCHITECTURE.md`
-- `../persona-wezterm/ARCHITECTURE.md`
+- `../persona-terminal/ARCHITECTURE.md`

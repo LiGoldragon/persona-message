@@ -53,7 +53,7 @@ nix run .#test-pty-pi-niri-focus
 ```
 
 It starts `initiator` and `responder` Pi harnesses with `qwen3.6-27b`, attaches
-visible WezTerm viewers, discovers their Niri window ids, subscribes through
+visible terminal viewers, discovers their Niri window ids, subscribes through
 `persona-system`, and drives focus between the windows.
 
 The visible Pi guarded-delivery test exercises the transitional delivery gate:
