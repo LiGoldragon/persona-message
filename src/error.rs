@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,25 +19,6 @@ pub enum Error {
 
     #[error("unexpected command-line argument: {got:?}")]
     UnexpectedArgument { got: String },
-
-    #[error("actor index line {line} is invalid in {path:?}")]
-    InvalidActorLine {
-        path: PathBuf,
-        line: usize,
-        source: nota_codec::Error,
-    },
-
-    #[error("no actor in {path:?} matches this process ancestry")]
-    NoMatchingAgent { path: PathBuf },
-
-    #[error("process {pid} has no PPid field in /proc/{pid}/status")]
-    MissingParentProcess { pid: u32 },
-
-    #[error("process ancestry is empty")]
-    EmptyProcessAncestry,
-
-    #[error("process id {got:?} is invalid")]
-    InvalidProcessId { got: String },
 
     #[error("router socket is not configured; set PERSONA_MESSAGE_ROUTER_SOCKET")]
     SignalRouterSocketMissing,

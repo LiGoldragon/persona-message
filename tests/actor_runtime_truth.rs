@@ -22,10 +22,6 @@ impl SourceFile {
     fn contains(&self, fragment: &str) -> bool {
         self.content.contains(fragment)
     }
-
-    fn count(&self, fragment: &str) -> usize {
-        self.content.matches(fragment).count()
-    }
 }
 
 struct SourceTree {
@@ -228,26 +224,25 @@ fn proxy_endpoint_vocabulary_is_not_owned_here() {
 }
 
 #[test]
-fn proxy_constructs_auth_proof_in_one_place() {
-    let mut locations = Vec::new();
+fn proxy_constructs_no_in_band_proof_material() {
+    let forbidden_fragments = ["AuthProof", "LocalOperatorProof", ".with_auth("];
+
+    let mut violations = Vec::new();
     for file in SourceTree::new()
         .source_files()
         .into_iter()
         .map(SourceFile::read)
     {
-        for _ in 0..file.count("LocalOperatorProof::new") {
-            locations.push(file.path.display().to_string());
+        for fragment in forbidden_fragments {
+            if file.contains(fragment) {
+                violations.push(format!("{} contains {fragment}", file.path.display()));
+            }
         }
     }
 
-    assert_eq!(
-        locations,
-        vec![
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("src")
-                .join("router.rs")
-                .display()
-                .to_string()
-        ]
+    assert!(
+        violations.is_empty(),
+        "proxy proof-material violations:\n{}",
+        violations.join("\n")
     );
 }

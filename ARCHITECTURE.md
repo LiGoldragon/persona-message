@@ -34,20 +34,20 @@ flowchart LR
 - NOTA `Send` and `Inbox` input records;
 - one length-prefixed `signal-persona-message` request frame per invocation;
 - one NOTA reply projection per invocation;
-- read-only caller resolution from the transitional `actors.nota` file.
+- no caller-identity resolution and no local actor index.
 
 ## 2 · State and Ownership
 
 The proxy owns no durable message state. It requires
 `PERSONA_MESSAGE_ROUTER_SOCKET` and exits if the router socket is absent.
 
-Caller identity is resolved from process ancestry against `actors.nota` and
-carried as Signal auth. The `MessageSubmission` and `InboxQuery` payloads remain
-sender-free.
+Caller identity is not resolved in this repo. `MessageSubmission` and
+`InboxQuery` stay sender-free, and the proxy sends no in-band proof material.
+Router/daemon ingress stamps provenance from the accepted socket context.
 
-The transitional `actors.nota` file is read-only from this repo. Actor
-registration, actor listing, pending delivery, retry, delivery results, and
-message ledger state are router or engine-manager concerns, not proxy state.
+Actor registration, actor listing, pending delivery, retry, delivery results,
+and message ledger state are router or engine-manager concerns, not proxy
+state.
 
 ## 3 · Boundaries
 
@@ -56,7 +56,7 @@ This repo owns:
 - NOTA parsing for the `message` command;
 - projection from NOTA `Send` / `Inbox` to `signal-persona-message`;
 - projection from `signal-persona-message` replies back to NOTA;
-- process-ancestry caller lookup for Signal auth.
+- length-prefixed Signal frame transport to the configured router socket.
 
 This repo does not own:
 
@@ -76,7 +76,8 @@ This repo does not own:
 - Supported input variants are `Send` and `Inbox`.
 - The router socket is mandatory.
 - Outbound traffic is a length-prefixed rkyv Signal frame.
-- Caller identity is Signal auth, not a request payload field.
+- Sender identity is absent from the CLI payload and absent from frame auth.
+- Provenance is stamped by router/daemon ingress, not by this proxy.
 - The proxy does not write local message or pending logs.
 - The proxy does not build or run a daemon.
 - The proxy does not depend on an actor runtime.
@@ -86,9 +87,8 @@ This repo does not own:
 ```text
 src/main.rs       message CLI entry
 src/command.rs    NOTA input/output projection
-src/resolver.rs   read-only process ancestry to actor lookup
 src/router.rs     Signal router client
-src/schema.rs     proxy-local NOTA actor id records
+src/surface.rs    proxy-local NOTA surface records
 src/error.rs      crate error enum
 tests/            proxy and architectural-truth tests
 ```
@@ -100,6 +100,7 @@ tests/            proxy and architectural-truth tests
 | The router Signal path cannot create a local message ledger. | `nix flake check .#message-cli-sends-router-signal-without-local-ledger` |
 | Inbox reads come from the router, not a local ledger. | `nix flake check .#message-cli-inbox-uses-router-signal-not-local-ledger` |
 | The router socket is mandatory. | `nix flake check .#message-cli-requires-router-socket` |
+| The proxy does not construct in-band proof material. | `nix flake check .#message-proxy-cannot-own-local-ledger` |
 | Retired terminal-brand vocabulary cannot return. | `nix flake check .#message-runtime-cannot-reference-retired-terminal-brand` |
 | Local ledger, daemon, endpoint, and actor-runtime surfaces cannot return. | `nix flake check .#message-proxy-cannot-own-local-ledger` |
 

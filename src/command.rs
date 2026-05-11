@@ -11,19 +11,18 @@ use signal_persona_message::{
 };
 
 use crate::error::{Error, Result};
-use crate::resolver::ActorIndexPath;
 use crate::router::SignalRouterSocket;
-use crate::schema::{ActorId, expect_end};
+use crate::surface::{RecipientName, expect_end};
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Send {
-    pub recipient: ActorId,
+    pub recipient: RecipientName,
     pub body: String,
 }
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct Inbox {
-    pub recipient: ActorId,
+    pub recipient: RecipientName,
 }
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -40,12 +39,11 @@ impl Input {
         Ok(input)
     }
 
-    pub fn run(self, actor_index_path: &ActorIndexPath, mut output: impl Write) -> Result<()> {
+    pub fn run(self, mut output: impl Write) -> Result<()> {
         let socket =
             SignalRouterSocket::from_environment().ok_or(Error::SignalRouterSocketMissing)?;
-        let sender = actor_index_path.resolve_current_process()?;
         let request = self.into_message_request();
-        let reply = socket.client().submit(&sender, request)?;
+        let reply = socket.client().submit(request)?;
         writeln!(output, "{}", Output::from_router_reply(reply)?.to_nota()?)?;
         Ok(())
     }
@@ -122,7 +120,7 @@ pub struct RouterInboxListing {
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
 pub struct RouterInboxEntry {
     pub message_slot: u64,
-    pub sender: ActorId,
+    pub sender: RecipientName,
     pub body: String,
 }
 
@@ -210,7 +208,7 @@ impl RouterInboxEntry {
     fn from_signal(entry: signal_persona_message::InboxEntry) -> Self {
         Self {
             message_slot: entry.message_slot.into_u64(),
-            sender: ActorId::new(entry.sender.as_str()),
+            sender: RecipientName::new(entry.sender.as_str()),
             body: entry.body.as_str().to_string(),
         }
     }
@@ -254,8 +252,8 @@ impl CommandLine {
         }
     }
 
-    pub fn run(&self, actor_index_path: &ActorIndexPath, output: impl Write) -> Result<()> {
-        self.decode_input()?.run(actor_index_path, output)
+    pub fn run(&self, output: impl Write) -> Result<()> {
+        self.decode_input()?.run(output)
     }
 
     fn require_single_argument(&self) -> Result<()> {

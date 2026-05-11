@@ -1,7 +1,7 @@
 # persona-message skill
 
 Work here when the change concerns the `message` CLI, NOTA message projection,
-sender resolution, the transitional local ledger, or real harness message tests.
+router proxying, or real harness message tests.
 
 Rules for work here:
 
@@ -12,10 +12,10 @@ Rules for work here:
 - The proxy must not write local message ledgers, pending logs, daemon state, or
   actor-registration files. Router-owned Sema tables are the durable message
   owner.
-- Keep sender identity resolved by process ancestry against read-only
-  `actors.nota`; do not trust sender fields written by a model. Attach the
-  resolved caller as Signal auth; do not add a sender field to
-  `MessageSubmission`.
+- Do not trust sender fields written by a model. The proxy does not include a
+  sender field, read a local actor index, resolve process ancestry, or
+  construct in-band proof material; router/daemon ingress stamps provenance
+  from the accepted socket context.
 - Supported input variants are `Send` and `Inbox`. Registry, listing, retry,
   tail, and delivery operations belong to router, mind, harness, or terminal
   surfaces as their contracts land.

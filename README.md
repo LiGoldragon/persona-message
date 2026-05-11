@@ -8,20 +8,17 @@ typed reply frame, and prints one NOTA reply.
 The supported input records are:
 
 ```sh
-PERSONA_MESSAGE_STORE=.message \
 PERSONA_MESSAGE_ROUTER_SOCKET=/run/persona/router.sock \
   message '(Send designer "Need a layout pass.")'
 
-PERSONA_MESSAGE_STORE=.message \
 PERSONA_MESSAGE_ROUTER_SOCKET=/run/persona/router.sock \
   message '(Inbox designer)'
 ```
 
-`PERSONA_MESSAGE_STORE` is transitional and read-only for this proxy. It points
-at a directory containing `actors.nota`, used only to resolve the caller from
-process ancestry before building Signal auth. The proxy does not write
-`actors.nota`, message ledgers, pending logs, terminal endpoints, or daemon
-state.
+The proxy does not resolve sender identity, construct in-band proof material,
+or read a local actor index. The router/daemon side stamps provenance from the
+accepted socket context. The proxy does not write message ledgers, pending
+logs, terminal endpoints, actor-registration files, or daemon state.
 
 Durable message acceptance, pending delivery, retry, owner approval, and
 terminal delivery state belong to `persona-router` and its downstream

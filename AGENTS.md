@@ -19,8 +19,9 @@ This repo is in stateless router-proxy phase. Keep the implementation narrow:
   `signal-persona-message` frames. `PERSONA_MESSAGE_ROUTER_SOCKET` is required.
 - The proxy must not append to a local ledger, run a daemon, or write actor
   registration state.
-- The transitional `actors.nota` file is read only and exists only to resolve
-  process ancestry into Signal auth until the router/engine actor catalog lands.
+- The proxy must not resolve caller identity, construct in-band proof material,
+  or read a local actor index. Router/daemon ingress stamps provenance from the
+  accepted socket context.
 - Do not add a router line-protocol fallback.
 
 BEADS is transitional workspace coordination. Do not add a BEADS bridge here;
