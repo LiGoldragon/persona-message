@@ -31,19 +31,11 @@ Rules for work here:
 - Use `scripts/test-pty-pi-guarded-delivery` when validating that terminal
   delivery defers while a target harness window is focused and delivers only
   after focus moves to a neutral window.
-- Use `scripts/test-pty-pi-router-delivery` when validating the router daemon
-  path. It registers Pi harnesses as actors, queues unsafe deliveries in
-  `persona-router`, and releases them only after pushed focus or prompt
-  observations arrive.
-- Use `scripts/test-pty-pi-router-relay` when validating that trained Pi
-  harnesses can use `message '(Send ...)'` themselves while the message CLI
-  routes through the current legacy `PERSONA_ROUTER_SOCKET` line protocol.
-- Use `scripts/debug-pty-pi-router-relay-state` for relay diagnostics. Do not
-  inspect relay state with one-off shell capture commands; keep the diagnostic
-  path named and exposed through Nix.
-- Treat the local ledger and `PERSONA_ROUTER_SOCKET` line protocol as
-  transitional development state. Do not deepen either into the final database
-  or router protocol surface.
+- The old router-delivery and router-relay scripts used a router NOTA line
+  socket and are retired. Rebuild those workflows only with typed Signal
+  contracts.
+- Treat the local ledger as transitional development state. Do not deepen it
+  into the final database or router protocol surface.
 
 Use component-to-component rkyv frames through relation-specific Signal
 contracts when the CLI or daemon crosses into router/store territory. Use NOTA

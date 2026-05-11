@@ -12,7 +12,7 @@ use signal_persona_message::{
 
 use crate::daemon::{DaemonSocket, MessageDaemonClient};
 use crate::error::{Error, Result};
-use crate::router::{RouterSocket, SignalRouterSocket};
+use crate::router::SignalRouterSocket;
 use crate::schema::{Actor, ActorId, EndpointTransport, Message, MessageId, ThreadId, expect_end};
 use crate::store::MessageStore;
 
@@ -135,20 +135,6 @@ impl Input {
                 other => {
                     self = other;
                 }
-            }
-        }
-        if let Some(socket) = RouterSocket::from_environment() {
-            if let Self::Send(send) = self.clone() {
-                let sender = store.resolve_sender()?;
-                let message = send.into_message(sender, store.next_sequence()?);
-                let _reply = socket.client().route(&message)?;
-                store.append(&message)?;
-                writeln!(
-                    output,
-                    "{}",
-                    Output::Accepted(Accepted { message }).to_nota()?
-                )?;
-                return Ok(());
             }
         }
         match self {

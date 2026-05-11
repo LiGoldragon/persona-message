@@ -27,8 +27,6 @@ flowchart LR
     "signal-persona-message" -->|"length-prefixed rkyv"| "persona-router"
     "persona-router" -->|"MessageReply frame"| "message CLI"
     "message CLI" -->|"NOTA reply"| "human or harness"
-
-    "message CLI" -. "legacy fallback" .-> "message-daemon"
     "message-daemon" -. "Kameo mailbox" .-> "Ledger"
     "Ledger" -. "transitional only" .-> "messages.nota.log"
 ```
@@ -80,8 +78,8 @@ This repo owns:
 - NOTA `Register`, `Agents`, `Send`, `Inbox`, and `Tail` CLI surfaces;
 - proxying `Send` and `Inbox` to `persona-router` as
   `signal-persona-message` frames;
-- sender resolution from process ancestry for Signal auth and for the legacy
-  local path;
+- sender resolution from process ancestry for Signal auth and for the local
+  development path;
 - human/harness message projection;
 - stateful real-harness test scripts.
 
@@ -105,9 +103,8 @@ This repo does not own:
   `MessageSubmission`.
 - The Signal router path never writes `messages.nota.log`; durable message
   acceptance belongs to `persona-router`.
-- `PERSONA_ROUTER_SOCKET` is a legacy line-protocol compatibility path for the
-  existing visible harness scripts until `persona-router` accepts
-  `signal-persona-message` frames directly.
+- `persona-router` ingress is Signal-only. Do not add a router line-protocol
+  fallback.
 - Daemon requests touch the transitional ledger only through Kameo mailboxes:
   `DaemonRoot` first, supervised `Ledger` second.
 - Kameo messages are data-bearing; empty marker messages are forbidden for
@@ -125,7 +122,7 @@ src/bin/message-daemon.rs
 src/actors/            Kameo actor planes
 src/schema.rs          NOTA-facing records
 src/resolver.rs        process ancestry sender resolution
-src/router.rs          Signal router client plus legacy router-line client
+src/router.rs          Signal router client
 src/store.rs           transitional local ledger
 src/daemon.rs          transitional daemon surface and daemon root actor
 scripts/               repeatable stateful harness workflows

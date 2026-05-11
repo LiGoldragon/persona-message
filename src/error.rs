@@ -75,9 +75,6 @@ pub enum Error {
     #[error("actor call failed: {detail}")]
     ActorCall { detail: String },
 
-    #[error("router response was empty")]
-    RouterResponseEmpty,
-
     #[error("router reply was not valid for this command: {got}")]
     UnexpectedRouterReply { got: String },
 }

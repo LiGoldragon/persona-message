@@ -18,9 +18,9 @@ This repo is in router-proxy transition phase. Keep the implementation narrow:
 - `Send` and `Inbox` proxy to `persona-router` as length-prefixed
   `signal-persona-message` frames when `PERSONA_MESSAGE_ROUTER_SOCKET` is set.
 - The Signal router path must not append to the transitional local ledger.
-- The local ledger, `message-daemon`, `Register`, `Agents`, `Tail`, and
-  `PERSONA_ROUTER_SOCKET` line protocol remain compatibility scaffolding for
-  older visible harness tests.
+- The local ledger, `message-daemon`, `Register`, `Agents`, and `Tail` remain
+  compatibility scaffolding for older visible harness tests. Do not add a
+  router line-protocol fallback.
 
 BEADS is transitional workspace coordination. Do not add a BEADS bridge here;
 Persona's typed fabric is intended to absorb that role later.

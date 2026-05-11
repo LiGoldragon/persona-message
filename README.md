@@ -66,31 +66,10 @@ It binds actor endpoints to Niri window ids, creates a neutral focus window,
 proves delivery is deferred while the responder window is focused, then moves
 focus to neutral and flushes the pending message.
 
-The visible Pi router-delivery test exercises the router actor path:
-
-```sh
-nix run .#test-pty-pi-router-delivery
-```
-
-It starts the `persona-router` daemon, registers the Pi harnesses as actors,
-routes one message while the responder window is focused, then routes another
-while the responder prompt contains a human draft. Both messages remain pending
-until pushed focus or prompt observations make delivery safe.
-
-The visible Pi router-relay test still exercises trained harness messaging
-through the legacy router-line compatibility path:
-
-```sh
-nix run .#test-pty-pi-router-relay
-```
-
-It starts trained `initiator` and `responder` Pi harnesses, routes the first
-operator instruction through `message '(Send initiator ...)'`, then expects the
-agents to use `message` themselves: initiator messages responder, responder
-replies to initiator, and initiator reports completion to operator. The same
-run also verifies focus and prompt guards before releasing queued deliveries
-through pushed observations. This compatibility path uses `PERSONA_ROUTER_SOCKET`
-until `persona-router` accepts `signal-persona-message` frames directly.
+The old visible Pi router-delivery and router-relay scripts depended on a
+router NOTA line socket and have been retired. Their replacement must use
+`signal-persona-message` for message ingress and typed Signal contracts for
+registration, prompt, and focus observations.
 
 BEADS remains useful for today's workspace coordination, but it is not part of
 the Persona API. Persona coordination flows through relation-specific typed
