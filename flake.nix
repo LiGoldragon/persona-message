@@ -39,9 +39,19 @@
             strictDeps = true;
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+          messageConstraintCheck =
+            name: script:
+            pkgs.runCommand name { } ''
+              set -euo pipefail
+
+              export MESSAGE_BIN=${self.packages.${system}.default}/bin/message
+              ${pkgs.bash}/bin/bash ${script}
+
+              touch "$out"
+            '';
         in
         {
-          inherit pkgs toolchain craneLib commonArgs cargoArtifacts;
+          inherit pkgs toolchain craneLib commonArgs cargoArtifacts messageConstraintCheck;
         };
     in
     {
@@ -320,6 +330,29 @@
             context.commonArgs
             // {
               inherit (context) cargoArtifacts;
+            }
+          );
+          message-cli-accepts-one-nota-record-and-prints-one-nota-reply =
+            context.messageConstraintCheck "message-cli-accepts-one-nota-record-and-prints-one-nota-reply" ./scripts/message-cli-accepts-one-nota-record-and-prints-one-nota-reply;
+          message-cli-sends-router-signal-without-local-ledger = context.craneLib.cargoTest (
+            context.commonArgs
+            // {
+              inherit (context) cargoArtifacts;
+              cargoTestExtraArgs = "--test message command_line_send_routes_signal_frame_without_writing_local_ledger -- --exact";
+            }
+          );
+          message-cli-inbox-uses-router-signal-not-local-ledger = context.craneLib.cargoTest (
+            context.commonArgs
+            // {
+              inherit (context) cargoArtifacts;
+              cargoTestExtraArgs = "--test message command_line_inbox_routes_signal_frame_without_reading_local_ledger -- --exact";
+            }
+          );
+          message-daemon-routes-cli-clients-through-kameo-ledger = context.craneLib.cargoTest (
+            context.commonArgs
+            // {
+              inherit (context) cargoArtifacts;
+              cargoTestExtraArgs = "--test daemon cli_clients_route_messages_through_daemon_actor_state -- --exact";
             }
           );
         }

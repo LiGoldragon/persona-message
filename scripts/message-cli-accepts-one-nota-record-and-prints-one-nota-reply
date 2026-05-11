@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+message="${MESSAGE_BIN:?MESSAGE_BIN must point at the message binary}"
+workspace="$(mktemp -d)"
+store="$workspace/store"
+
+mkdir -p "$store"
+printf '(Actor operator %s None)\n' "$$" >"$store/actors.nota"
+
+PERSONA_MESSAGE_STORE="$store" \
+  "$message" '(Send designer ready-token)' \
+  >"$workspace/reply.out"
+
+test "$(wc -l <"$workspace/reply.out")" -eq 1
+grep -Fq '(Accepted (Message ' "$workspace/reply.out"
+grep -Fq ' direct-operator-designer operator designer ready-token [])' "$workspace/reply.out"
+
+set +e
+PERSONA_MESSAGE_STORE="$store" \
+  "$message" '(Inbox' 'designer)' \
+  >"$workspace/two-records.out" \
+  2>"$workspace/two-records.err"
+status="$?"
+set -e
+
+if [[ "$status" -eq 0 ]]; then
+  echo "message accepted more than one NOTA request record" >&2
+  exit 1
+fi
+
+grep -Fq 'UnexpectedArgument { got: "designer)" }' "$workspace/two-records.err"
