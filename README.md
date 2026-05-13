@@ -10,25 +10,26 @@ to `persona-message-daemon` on the engine's user-writable socket
 NOTA reply.
 
 The `persona-message-daemon` binary is the engine's user-writable ingress
-boundary: it binds `message.sock` (mode 0660, engine-owner group), mints
-origin tags from SO_PEERCRED, and forwards typed Signal frames to
-`persona-router` over the internal `router.sock`. No durable state; no
-local message ledger.
+boundary: it binds `message.sock` (mode 0660, engine-owner group) and forwards
+typed Signal frames to `persona-router` over the internal `router.sock`. No
+durable state; no local message ledger. SO_PEERCRED origin stamping waits on
+the stamped-submission contract in `signal-persona-message`.
 
 The supported input records are:
 
 ```sh
-PERSONA_MESSAGE_ROUTER_SOCKET=/run/persona/router.sock \
+PERSONA_MESSAGE_SOCKET=/run/persona/engine-main/message.sock \
   message '(Send designer "Need a layout pass.")'
 
-PERSONA_MESSAGE_ROUTER_SOCKET=/run/persona/router.sock \
+PERSONA_MESSAGE_SOCKET=/run/persona/engine-main/message.sock \
   message '(Inbox designer)'
 ```
 
-The proxy does not resolve sender identity, construct in-band proof material,
-or read a local actor index. The router/daemon side stamps provenance from the
-accepted socket context. The proxy does not write message ledgers, pending
-logs, terminal endpoints, actor-registration files, or daemon state.
+The message component does not construct in-band proof material, read a local
+actor index, or write message ledgers, pending logs, terminal endpoints, or
+actor-registration files. Origin stamping is the daemon/router ingress
+boundary; as of this slice, the daemon forwards typed message frames and the
+stamped-submission contract is still pending in `signal-persona-message`.
 
 Durable message acceptance, pending delivery, retry, owner approval, and
 terminal delivery state belong to `persona-router` and its downstream

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_root="${1:?usage: message-component-cannot-own-local-ledger <source-root>}"
+
+if rg --line-number \
+  --glob 'Cargo.toml' \
+  --glob 'Cargo.lock' \
+  --glob 'flake.nix' \
+  --glob 'src/**' \
+  --glob 'tests/**' \
+  --glob '!tests/actor_runtime_truth.rs' \
+  --glob '!scripts/message-component-cannot-own-local-ledger' \
+  'messages[.]nota[.]log|pending[.]nota[.]log|actors[.]nota|PERSONA_MESSAGE_ACTORS|PERSONA_MESSAGE_STORE|MessageStore|StorePath|DeliveryGate|DeliveryOutcome|DeliveryDeferral|EndpointTransport|EndpointKind|PtySocket|Register|Agents|Flush|Tail|AuthProof|LocalOperatorProof|with_auth' \
+  "$source_root"
+then
+  echo "persona-message still owns retired local ledger, actor index, in-band proof, or endpoint surface" >&2
+  exit 1
+fi

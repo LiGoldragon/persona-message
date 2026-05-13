@@ -5,23 +5,27 @@ orchestration protocol before editing this repository.
 
 ## Repo Role
 
-Persona Message is the `message` CLI and text projection boundary for
-harness-to-harness communication. It owns the NOTA convenience surface used by
-humans and harnesses, then proxies router-bound operations into the
-`signal-persona-message` contract.
+Persona Message is the engine message-ingress component. It owns the `message`
+CLI and the supervised `persona-message-daemon`; together they carry NOTA
+message requests from humans and harnesses into typed `signal-persona-message`
+frames for the router.
 
 ## Current Phase
 
-This repo is in stateless router-proxy phase. Keep the implementation narrow:
+This repo is in supervised ingress phase. Keep the implementation narrow:
 
 - A `message` binary that decodes one NOTA input record.
-- `Send` and `Inbox` proxy to `persona-router` as length-prefixed
-  `signal-persona-message` frames. `PERSONA_MESSAGE_ROUTER_SOCKET` is required.
-- The proxy must not append to a local ledger, run a daemon, or write actor
-  registration state.
-- The proxy must not resolve caller identity, construct in-band proof material,
-  or read a local actor index. Router/daemon ingress stamps provenance from the
-  accepted socket context.
+- A `persona-message-daemon` binary that binds `message.sock`, accepts
+  length-prefixed `signal-persona-message` frames, and forwards them to
+  `persona-router` over the internal router socket.
+- The CLI uses `PERSONA_MESSAGE_SOCKET` / `PERSONA_SOCKET_PATH`; the daemon
+  uses `PERSONA_MESSAGE_ROUTER_SOCKET` or the router peer socket from the
+  spawn envelope.
+- The component must not append to a local ledger or write actor registration
+  state.
+- The component must not construct in-band proof material or read a local actor
+  index. Origin stamping waits on the stamped-submission contract rather than
+  being faked locally.
 - Do not add a router line-protocol fallback.
 
 BEADS is transitional workspace coordination. Do not add a BEADS bridge here;

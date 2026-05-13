@@ -11,7 +11,7 @@ use signal_persona_message::{
 };
 
 use crate::error::{Error, Result};
-use crate::router::SignalRouterSocket;
+use crate::router::SignalMessageSocket;
 use crate::surface::{RecipientName, expect_end};
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
@@ -41,7 +41,7 @@ impl Input {
 
     pub fn run(self, mut output: impl Write) -> Result<()> {
         let socket =
-            SignalRouterSocket::from_environment().ok_or(Error::SignalRouterSocketMissing)?;
+            SignalMessageSocket::from_environment().ok_or(Error::SignalMessageSocketMissing)?;
         let request = self.into_message_request();
         let reply = socket.client().submit(request)?;
         writeln!(output, "{}", Output::from_router_reply(reply)?.to_nota()?)?;

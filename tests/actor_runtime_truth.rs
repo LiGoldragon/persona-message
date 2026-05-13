@@ -79,73 +79,38 @@ impl SourceTree {
 }
 
 #[test]
-fn proxy_has_no_actor_runtime() {
-    let forbidden_fragments = [
-        "kameo =",
-        "name = \"kameo\"",
-        "tokio =",
-        "name = \"tokio\"",
-        "async-std",
-        "ractor =",
-        "name = \"ractor\"",
-        "use kameo",
-        "kameo::",
-        "use tokio",
-        "tokio::",
-        "use ractor",
-        "ractor::",
-    ];
-
-    let mut violations = Vec::new();
-    for file in SourceTree::new().guarded_files() {
-        if file.is_guard_source() {
-            continue;
-        }
-        for fragment in forbidden_fragments {
-            if file.contains(fragment) {
-                violations.push(format!("{} contains {fragment}", file.path.display()));
-            }
-        }
-    }
-
-    assert!(
-        violations.is_empty(),
-        "proxy actor-runtime violations:\n{}",
-        violations.join("\n")
+fn message_daemon_uses_data_bearing_kameo_root_actor() {
+    let cargo = SourceFile::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"));
+    let daemon = SourceFile::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("daemon.rs"),
     );
+
+    assert!(cargo.contains("kameo"));
+    assert!(cargo.contains("tokio"));
+    assert!(daemon.contains("pub struct MessageDaemonRoot {"));
+    assert!(daemon.contains("router: SignalRouterClient,"));
+    assert!(daemon.contains("forwarded_count: u64,"));
+    assert!(daemon.contains("impl Actor for MessageDaemonRoot"));
 }
 
 #[test]
-fn proxy_has_no_daemon_binary() {
-    let forbidden_fragments = [
-        "message-daemon",
-        "PERSONA_MESSAGE_DAEMON",
-        "DaemonRoot",
-        "DaemonEnvelope",
-        "MessageDaemon",
-    ];
-
-    let mut violations = Vec::new();
-    for file in SourceTree::new().guarded_files() {
-        if file.is_guard_source() {
-            continue;
-        }
-        for fragment in forbidden_fragments {
-            if file.contains(fragment) {
-                violations.push(format!("{} contains {fragment}", file.path.display()));
-            }
-        }
-    }
-
-    assert!(
-        violations.is_empty(),
-        "proxy daemon-surface violations:\n{}",
-        violations.join("\n")
+fn message_cli_uses_message_socket_not_router_socket() {
+    let command = SourceFile::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("command.rs"),
     );
+
+    assert!(command.contains("SignalMessageSocket"));
+    assert!(command.contains("SignalMessageSocketMissing"));
+    assert!(!command.contains("SignalRouterSocket"));
+    assert!(!command.contains("SignalRouterSocketMissing"));
 }
 
 #[test]
-fn proxy_input_enum_has_exact_destination_variants() {
+fn message_input_enum_has_exact_destination_variants() {
     let source = SourceFile::read(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("src")
@@ -164,7 +129,7 @@ fn proxy_input_enum_has_exact_destination_variants() {
 }
 
 #[test]
-fn proxy_cannot_open_local_message_ledger() {
+fn message_component_cannot_open_local_message_ledger() {
     let forbidden_fragments = [
         "messages.nota.log",
         "pending.nota.log",
@@ -189,13 +154,13 @@ fn proxy_cannot_open_local_message_ledger() {
 
     assert!(
         violations.is_empty(),
-        "proxy local-ledger violations:\n{}",
+        "message component local-ledger violations:\n{}",
         violations.join("\n")
     );
 }
 
 #[test]
-fn proxy_endpoint_vocabulary_is_not_owned_here() {
+fn message_component_endpoint_vocabulary_is_not_owned_here() {
     let forbidden_fragments = [
         "EndpointTransport",
         "EndpointKind",
@@ -218,13 +183,13 @@ fn proxy_endpoint_vocabulary_is_not_owned_here() {
 
     assert!(
         violations.is_empty(),
-        "proxy endpoint-vocabulary violations:\n{}",
+        "message component endpoint-vocabulary violations:\n{}",
         violations.join("\n")
     );
 }
 
 #[test]
-fn proxy_constructs_no_in_band_proof_material() {
+fn message_component_constructs_no_in_band_proof_material() {
     let forbidden_fragments = ["AuthProof", "LocalOperatorProof", ".with_auth("];
 
     let mut violations = Vec::new();
@@ -242,7 +207,7 @@ fn proxy_constructs_no_in_band_proof_material() {
 
     assert!(
         violations.is_empty(),
-        "proxy proof-material violations:\n{}",
+        "message component proof-material violations:\n{}",
         violations.join("\n")
     );
 }

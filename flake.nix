@@ -1,5 +1,5 @@
 {
-  description = "Persona message NOTA proxy.";
+  description = "Persona message NOTA CLI and ingress daemon.";
 
   inputs = {
     nixpkgs.url = "github:LiGoldragon/nixpkgs?ref=main";
@@ -121,14 +121,16 @@
           );
           message-runtime-cannot-reference-retired-terminal-brand =
             context.sourceConstraintCheck "message-runtime-cannot-reference-retired-terminal-brand" ./scripts/message-runtime-cannot-reference-retired-terminal-brand;
-          message-proxy-cannot-own-local-ledger =
-            context.sourceConstraintCheck "message-proxy-cannot-own-local-ledger" ./scripts/message-proxy-cannot-own-local-ledger;
+          message-component-cannot-own-local-ledger =
+            context.sourceConstraintCheck "message-component-cannot-own-local-ledger" ./scripts/message-component-cannot-own-local-ledger;
           message-cli-sends-router-signal-without-local-ledger =
             context.cargoTest "command_line_send_routes_signal_frame_without_writing_local_ledger";
           message-cli-inbox-uses-router-signal-not-local-ledger =
             context.cargoTest "command_line_inbox_routes_signal_frame_without_reading_local_ledger";
-          message-cli-requires-router-socket =
-            context.cargoTest "command_line_send_requires_router_socket";
+          message-cli-requires-message-socket =
+            context.cargoTest "command_line_send_requires_message_socket";
+          persona-message-daemon-forwards-cli-signal-frame-to-router-socket =
+            context.cargoTest "persona_message_daemon_forwards_cli_signal_frame_to_router_socket";
         }
       );
 

@@ -20,7 +20,12 @@ pub enum Error {
     #[error("unexpected command-line argument: {got:?}")]
     UnexpectedArgument { got: String },
 
-    #[error("router socket is not configured; set PERSONA_MESSAGE_ROUTER_SOCKET")]
+    #[error("message daemon socket is not configured; set PERSONA_MESSAGE_SOCKET")]
+    SignalMessageSocketMissing,
+
+    #[error(
+        "router socket is not configured; set PERSONA_MESSAGE_ROUTER_SOCKET or provide a router peer socket in the spawn envelope"
+    )]
     SignalRouterSocketMissing,
 
     #[error("signal frame is too large: {bytes} bytes")]
@@ -28,6 +33,15 @@ pub enum Error {
 
     #[error("router reply was not valid for this command: {got}")]
     UnexpectedRouterReply { got: String },
+
+    #[error("daemon input was not a request frame: {got}")]
+    UnexpectedDaemonInput { got: String },
+
+    #[error("actor failed during {operation}: {detail}")]
+    Actor {
+        operation: &'static str,
+        detail: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
