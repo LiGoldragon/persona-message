@@ -1,11 +1,19 @@
 # Persona Message
 
-`persona-message` is the `message` CLI — Persona's NOTA-to-router boundary
-translator at the CLI surface. The `message` binary accepts exactly one
-NOTA input record, validates it through Rust types, sends one
-length-prefixed `signal-persona-message` frame to `persona-router`'s
-public ingress socket (`router-public.sock`, mode 0660), reads one
-typed reply frame, and prints one NOTA reply. There is no daemon.
+`persona-message` is the engine's message-ingress component. It owns the
+`message` CLI and the `persona-message-daemon` supervised first-stack daemon.
+
+The `message` binary accepts exactly one NOTA input record, validates it
+through Rust types, sends one length-prefixed `signal-persona-message` frame
+to `persona-message-daemon` on the engine's user-writable socket
+(`message.sock`, mode 0660), reads one typed reply frame, and prints one
+NOTA reply.
+
+The `persona-message-daemon` binary is the engine's user-writable ingress
+boundary: it binds `message.sock` (mode 0660, engine-owner group), mints
+origin tags from SO_PEERCRED, and forwards typed Signal frames to
+`persona-router` over the internal `router.sock`. No durable state; no
+local message ledger.
 
 The supported input records are:
 

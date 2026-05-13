@@ -1,16 +1,34 @@
 # persona-message — architecture
 
-*NOTA-to-router CLI boundary. One NOTA in, one NOTA out;
-no daemon, no actor runtime, no durable state.*
+*Engine message ingress / text boundary. Owns the
+`message` CLI and the `persona-message-daemon` supervised
+first-stack daemon.*
 
-`persona-message` owns the `message` CLI. It validates one NOTA request,
-projects supported message operations into `signal-persona-message` frames,
-sends them to `persona-router`'s **public ingress socket**
-(`router-public.sock`, mode 0660), and projects the typed router reply back
-to NOTA. The word "proxy" in earlier framings of this repo meant *"boundary
-translator at the CLI surface"*, not *"proxy daemon process"*. There is no
-intermediate daemon; see
-`~/primary/reports/designer/142-supervision-in-signal-persona-no-message-proxy-daemon.md`.
+`persona-message` owns two binaries:
+
+- The `message` CLI — one NOTA in, one NOTA out. Validates a
+  user-typed NOTA record through Rust types, projects to a
+  `signal-persona-message` frame, sends it to
+  `persona-message-daemon` on the engine's user-writable
+  socket (`message.sock`, mode 0660), reads one reply frame,
+  prints the NOTA reply.
+- The `persona-message-daemon` — a small Kameo daemon
+  supervised by `persona-daemon` as the engine's message
+  ingress component. Binds `message.sock` at mode 0660 with
+  the engine-owner group; mints
+  `MessageOrigin::External(ConnectionClass)` from
+  SO_PEERCRED on each connecting peer; forwards typed
+  Signal frames to `persona-router`'s internal socket
+  (`router.sock`, 0600) with the origin tag attached.
+
+The word "proxy" in earlier framings of this repo was
+descriptive ("proxy between CLI and router"), not a
+component name. Per
+`~/primary/reports/designer/142-supervision-in-signal-persona-no-message-proxy-daemon.md`,
+the supervised first-stack component is named
+`persona-message`; the long-lived binary is
+`persona-message-daemon`; the "proxy" name retires from
+type, binary, socket, and event vocabulary.
 
 > **Scope.** Any "sema" reference in this doc means today's `sema`
 > library (rename pending → `sema-db`). The eventual `Sema` is broader; today's
@@ -21,10 +39,11 @@ intermediate daemon; see
 
 ## 0 · TL;DR
 
-This repo is a **CLI boundary**, not a daemon and not a
-durable message ledger. The `message` binary is a one-shot
-translator from NOTA to a `signal-persona-message` frame
-sent to the router's public ingress socket.
+This repo owns the engine's message-ingress boundary: a
+small supervised daemon plus a CLI client. Neither carries
+a durable message ledger; both are stateless boundary
+surfaces. Routing policy, delivery state, and channel
+authority remain in `persona-router`.
 
 ```mermaid
 flowchart LR
