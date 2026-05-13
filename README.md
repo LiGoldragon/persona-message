@@ -1,9 +1,11 @@
 # Persona Message
 
-`persona-message` is Persona's NOTA message proxy. The `message` binary accepts
-exactly one NOTA input record, validates it through Rust types, sends one
-length-prefixed `signal-persona-message` frame to `persona-router`, reads one
-typed reply frame, and prints one NOTA reply.
+`persona-message` is the `message` CLI — Persona's NOTA-to-router boundary
+translator at the CLI surface. The `message` binary accepts exactly one
+NOTA input record, validates it through Rust types, sends one
+length-prefixed `signal-persona-message` frame to `persona-router`'s
+public ingress socket (`router-public.sock`, mode 0660), reads one
+typed reply frame, and prints one NOTA reply. There is no daemon.
 
 The supported input records are:
 
