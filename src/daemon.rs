@@ -1,11 +1,18 @@
 use std::ffi::OsString;
 use std::io::BufReader;
+use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::{Infallible, SendError};
 use kameo::message::{Context, Message};
-use signal_persona_message::{MessageReply, MessageRequest};
+use signal_persona::TimestampNanos;
+use signal_persona_auth::{ConnectionClass, MessageOrigin, UnixUserId};
+use signal_persona_message::{
+    MessageOperationKind, MessageReply, MessageRequest, MessageRequestUnimplemented,
+    MessageUnimplementedReason, StampedMessageSubmission,
+};
 
 use crate::error::{Error, Result};
 use crate::router::{
@@ -112,19 +119,21 @@ impl MessageDaemon {
         root: &ActorRef<MessageDaemonRoot>,
         stream: UnixStream,
     ) -> Result<()> {
-        let mut connection = MessageDaemonConnection::from_stream(stream);
+        let mut connection = MessageDaemonConnection::from_stream(stream)?;
+        let peer = connection.peer_credentials();
         let request = connection.read_request()?;
-        let reply =
-            match runtime.block_on(async { root.ask(ForwardMessageRequest { request }).await }) {
-                Ok(reply) => reply,
-                Err(SendError::HandlerError(error)) => return Err(error),
-                Err(error) => {
-                    return Err(Error::Actor {
-                        operation: "forward message request",
-                        detail: format!("{error:?}"),
-                    });
-                }
-            };
+        let reply = match runtime
+            .block_on(async { root.ask(ForwardMessageRequest { request, peer }).await })
+        {
+            Ok(reply) => reply,
+            Err(SendError::HandlerError(error)) => return Err(error),
+            Err(error) => {
+                return Err(Error::Actor {
+                    operation: "forward message request",
+                    detail: format!("{error:?}"),
+                });
+            }
+        };
         connection.write_reply(reply)?;
         Ok(())
     }
@@ -139,14 +148,21 @@ pub struct MessageDaemonInput {
 pub struct MessageDaemonConnection {
     stream: BufReader<UnixStream>,
     codec: SignalRouterFrameCodec,
+    peer_credentials: PeerCredentials,
 }
 
 impl MessageDaemonConnection {
-    pub fn from_stream(stream: UnixStream) -> Self {
-        Self {
+    pub fn from_stream(stream: UnixStream) -> Result<Self> {
+        let peer_credentials = PeerCredentials::from_stream(&stream)?;
+        Ok(Self {
             stream: BufReader::new(stream),
             codec: SignalRouterFrameCodec::default(),
-        }
+            peer_credentials,
+        })
+    }
+
+    pub fn peer_credentials(&self) -> PeerCredentials {
+        self.peer_credentials
     }
 
     pub fn read_request(&mut self) -> Result<MessageRequest> {
@@ -165,6 +181,7 @@ impl MessageDaemonConnection {
 #[derive(Debug)]
 pub struct MessageDaemonRoot {
     router: SignalRouterClient,
+    stamper: MessageOriginStamper,
     forwarded_count: u64,
 }
 
@@ -172,6 +189,7 @@ impl MessageDaemonRoot {
     pub fn new(input: MessageDaemonRootInput) -> Self {
         Self {
             router: input.router_socket.client(),
+            stamper: MessageOriginStamper::for_current_user(),
             forwarded_count: 0,
         }
     }
@@ -180,10 +198,15 @@ impl MessageDaemonRoot {
         Self::spawn(Self::new(input))
     }
 
-    fn forward(&mut self, request: MessageRequest) -> Result<MessageReply> {
-        let reply = self.router.submit(request)?;
-        self.forwarded_count = self.forwarded_count.saturating_add(1);
-        Ok(reply)
+    fn forward(&mut self, request: MessageRequest, peer: PeerCredentials) -> Result<MessageReply> {
+        match self.stamper.stamp_request(request, peer)? {
+            ForwardDecision::Forward(request) => {
+                let reply = self.router.submit(request)?;
+                self.forwarded_count = self.forwarded_count.saturating_add(1);
+                Ok(reply)
+            }
+            ForwardDecision::Reply(reply) => Ok(reply),
+        }
     }
 }
 
@@ -206,6 +229,7 @@ impl Actor for MessageDaemonRoot {
 
 pub struct ForwardMessageRequest {
     request: MessageRequest,
+    peer: PeerCredentials,
 }
 
 impl Message<ForwardMessageRequest> for MessageDaemonRoot {
@@ -216,6 +240,96 @@ impl Message<ForwardMessageRequest> for MessageDaemonRoot {
         message: ForwardMessageRequest,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.forward(message.request)
+        self.forward(message.request, message.peer)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerCredentials {
+    user_id: UnixUserId,
+}
+
+impl PeerCredentials {
+    pub fn from_stream(stream: &UnixStream) -> Result<Self> {
+        let mut credentials = libc::ucred {
+            pid: 0,
+            uid: 0,
+            gid: 0,
+        };
+        let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        let result = unsafe {
+            libc::getsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                std::ptr::addr_of_mut!(credentials).cast(),
+                std::ptr::addr_of_mut!(length),
+            )
+        };
+        if result != 0 {
+            return Err(Error::PeerCredentials);
+        }
+        Ok(Self {
+            user_id: UnixUserId::new(credentials.uid),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageOriginStamper {
+    engine_owner_user_id: UnixUserId,
+}
+
+impl MessageOriginStamper {
+    pub fn for_current_user() -> Self {
+        Self {
+            engine_owner_user_id: UnixUserId::new(unsafe { libc::geteuid() }),
+        }
+    }
+
+    pub fn stamp_request(
+        &self,
+        request: MessageRequest,
+        peer: PeerCredentials,
+    ) -> Result<ForwardDecision> {
+        match request {
+            MessageRequest::MessageSubmission(submission) => Ok(ForwardDecision::Forward(
+                MessageRequest::StampedMessageSubmission(StampedMessageSubmission {
+                    submission,
+                    origin: self.origin_for_peer(peer),
+                    stamped_at: Self::timestamp_now()?,
+                }),
+            )),
+            MessageRequest::StampedMessageSubmission(_) => Ok(ForwardDecision::Reply(
+                MessageReply::MessageRequestUnimplemented(MessageRequestUnimplemented {
+                    operation: MessageOperationKind::StampedMessageSubmission,
+                    reason: MessageUnimplementedReason::NotInPrototypeScope,
+                }),
+            )),
+            MessageRequest::InboxQuery(query) => {
+                Ok(ForwardDecision::Forward(MessageRequest::InboxQuery(query)))
+            }
+        }
+    }
+
+    fn origin_for_peer(&self, peer: PeerCredentials) -> MessageOrigin {
+        if peer.user_id == self.engine_owner_user_id {
+            MessageOrigin::External(ConnectionClass::Owner)
+        } else {
+            MessageOrigin::External(ConnectionClass::NonOwnerUser(peer.user_id))
+        }
+    }
+
+    fn timestamp_now() -> Result<TimestampNanos> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| Error::ClockBeforeUnixEpoch)?;
+        let nanos = duration.as_nanos().min(u128::from(u64::MAX)) as u64;
+        Ok(TimestampNanos::new(nanos))
+    }
+}
+
+pub enum ForwardDecision {
+    Forward(MessageRequest),
+    Reply(MessageReply),
 }

@@ -37,6 +37,12 @@ pub enum Error {
     #[error("daemon input was not a request frame: {got}")]
     UnexpectedDaemonInput { got: String },
 
+    #[error("could not read peer credentials for message socket")]
+    PeerCredentials,
+
+    #[error("system clock is before the Unix epoch")]
+    ClockBeforeUnixEpoch,
+
     #[error("actor failed during {operation}: {detail}")]
     Actor {
         operation: &'static str,

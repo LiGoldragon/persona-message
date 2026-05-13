@@ -3,8 +3,8 @@ use persona_message::command::{CommandLine, Input};
 use persona_message::router::SignalRouterFrameCodec;
 use signal_core::{FrameBody, Reply, Request, SemaVerb};
 use signal_persona_message::{
-    Frame, InboxEntry, InboxListing, MessageBody, MessageReply, MessageRequest, MessageSender,
-    MessageSlot, SubmissionAcceptance,
+    Frame, InboxEntry, InboxListing, MessageBody, MessageKind, MessageReply, MessageRequest,
+    MessageSender, MessageSlot, SubmissionAcceptance,
 };
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -167,6 +167,7 @@ fn command_line_send_routes_signal_frame_without_writing_local_ledger() {
         panic!("expected message submission");
     };
     assert_eq!(submission.recipient.as_str(), "designer");
+    assert_eq!(submission.kind, MessageKind::Send);
     assert_eq!(submission.body, MessageBody::new("signal-hello"));
     assert!(text.contains("(SubmissionAccepted 7)"));
     assert!(!fixture.local_ledger_path().exists());
@@ -192,6 +193,7 @@ fn command_line_send_preserves_bare_identifier_body_in_signal_payload() {
     let MessageRequest::MessageSubmission(submission) = recorded.request else {
         panic!("expected message submission");
     };
+    assert_eq!(submission.kind, MessageKind::Send);
     assert_eq!(submission.body.as_str(), "ready-token");
 }
 
@@ -279,11 +281,14 @@ fn persona_message_daemon_forwards_cli_signal_frame_to_router_socket() {
     let _ = daemon.wait();
 
     assert!(output.status.success());
-    let MessageRequest::MessageSubmission(submission) = recorded.request else {
-        panic!("expected daemon-forwarded message submission");
+    let MessageRequest::StampedMessageSubmission(stamped) = recorded.request else {
+        panic!("expected daemon-forwarded stamped message submission");
     };
+    let submission = stamped.submission;
     assert_eq!(submission.recipient.as_str(), "designer");
+    assert_eq!(submission.kind, MessageKind::Send);
     assert_eq!(submission.body.as_str(), "daemon-forward");
+    assert!(stamped.stamped_at.into_u64() > 0);
     assert!(text.contains("(SubmissionAccepted 11)"));
     assert!(!fixture.local_ledger_path().exists());
 }

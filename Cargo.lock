@@ -346,9 +346,12 @@ name = "persona-message"
 version = "0.1.0"
 dependencies = [
  "kameo",
+ "libc",
  "nota-codec",
  "rkyv",
  "signal-core",
+ "signal-persona",
+ "signal-persona-auth",
  "signal-persona-message",
  "tempfile",
  "thiserror",
@@ -542,13 +545,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal-persona-message"
+name = "signal-persona"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/signal-persona-message.git#06b14183b351bc6df5f75cac1192d02c3c0e3cdb"
+source = "git+https://github.com/LiGoldragon/signal-persona.git#44e1435bbe236751fc8a61ac081d526fe5938392"
 dependencies = [
  "nota-codec",
  "rkyv",
  "signal-core",
+]
+
+[[package]]
+name = "signal-persona-auth"
+version = "0.1.0"
+source = "git+https://github.com/LiGoldragon/signal-persona-auth.git#0f7d30980e9ede37e4547a8ca53cd5aa9d23321f"
+dependencies = [
+ "nota-codec",
+ "rkyv",
+ "signal-core",
+]
+
+[[package]]
+name = "signal-persona-message"
+version = "0.1.0"
+source = "git+https://github.com/LiGoldragon/signal-persona-message.git#1f2424248da356b40501602028d424f925e471cd"
+dependencies = [
+ "nota-codec",
+ "rkyv",
+ "signal-core",
+ "signal-persona",
+ "signal-persona-auth",
  "thiserror",
 ]
 

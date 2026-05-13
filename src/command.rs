@@ -6,8 +6,9 @@ use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_persona_message::{
     InboxQuery as SignalInboxQuery, MessageBody as SignalMessageBody,
-    MessageRecipient as SignalMessageRecipient, MessageReply, MessageRequest, MessageSubmission,
-    SubmissionRejectionReason as SignalSubmissionRejectionReason,
+    MessageKind as SignalMessageKind, MessageRecipient as SignalMessageRecipient, MessageReply,
+    MessageRequest, MessageRequestUnimplemented as SignalMessageRequestUnimplemented,
+    MessageSubmission, SubmissionRejectionReason as SignalSubmissionRejectionReason,
 };
 
 use crate::error::{Error, Result};
@@ -60,6 +61,7 @@ impl Send {
     pub fn into_message_request(self) -> MessageRequest {
         MessageRequest::MessageSubmission(MessageSubmission {
             recipient: SignalMessageRecipient::new(self.recipient.as_str()),
+            kind: SignalMessageKind::Send,
             body: SignalMessageBody::new(self.body),
         })
     }
@@ -129,6 +131,7 @@ pub enum Output {
     SubmissionAccepted(SubmissionAccepted),
     SubmissionRejected(SubmissionRejected),
     RouterInboxListing(RouterInboxListing),
+    MessageRequestUnimplemented(SignalMessageRequestUnimplemented),
 }
 
 impl Output {
@@ -159,6 +162,9 @@ impl Output {
                         .collect(),
                 }))
             }
+            MessageReply::MessageRequestUnimplemented(unimplemented) => {
+                Ok(Self::MessageRequestUnimplemented(unimplemented))
+            }
         }
     }
 }
@@ -169,6 +175,7 @@ impl NotaEncode for Output {
             Self::SubmissionAccepted(output) => output.encode(encoder),
             Self::SubmissionRejected(output) => output.encode(encoder),
             Self::RouterInboxListing(output) => output.encode(encoder),
+            Self::MessageRequestUnimplemented(output) => output.encode(encoder),
         }
     }
 }

@@ -24,8 +24,8 @@ This repo is in supervised ingress phase. Keep the implementation narrow:
 - The component must not append to a local ledger or write actor registration
   state.
 - The component must not construct in-band proof material or read a local actor
-  index. Origin stamping waits on the stamped-submission contract rather than
-  being faked locally.
+  index. Origin stamping is typed `StampedMessageSubmission` data minted from
+  SO_PEERCRED, never caller-provided text.
 - Do not add a router line-protocol fallback.
 
 BEADS is transitional workspace coordination. Do not add a BEADS bridge here;

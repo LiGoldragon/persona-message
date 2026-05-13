@@ -10,15 +10,16 @@ Rules for work here:
 - `message` sends length-prefixed rkyv Signal frames to
   `persona-message-daemon` through `PERSONA_MESSAGE_SOCKET` and prints one NOTA
   reply projection.
-- `persona-message-daemon` binds the supervised `message.sock`, forwards typed
+- `persona-message-daemon` binds the supervised `message.sock`, stamps
+  `MessageSubmission` frames into `StampedMessageSubmission`, forwards typed
   frames to `persona-router`, and owns no durable message state.
 - The component must not write local message ledgers, pending logs, or
   actor-registration files. Router-owned Sema tables are the durable message
   owner.
 - Do not trust sender fields written by a model. The component does not include
   a sender field, read a local actor index, resolve process ancestry, or
-  construct in-band proof material. Origin stamping must wait for the typed
-  stamped-submission contract instead of being encoded as strings.
+  construct in-band proof material. Origin stamping is typed data minted from
+  SO_PEERCRED, not a string field from the caller.
 - Supported input variants are `Send` and `Inbox`. Registry, listing, retry,
   tail, and delivery operations belong to router, mind, harness, or terminal
   surfaces as their contracts land.

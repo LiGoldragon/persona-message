@@ -1,19 +1,21 @@
 # Persona Message
 
 `persona-message` is the engine's message-ingress component. It owns the
-`message` CLI and the `persona-message-daemon` supervised first-stack daemon.
+`message` CLI and the `persona-message` daemon (binary:
+`persona-message-daemon`), the supervised first-stack component.
 
 The `message` binary accepts exactly one NOTA input record, validates it
 through Rust types, sends one length-prefixed `signal-persona-message` frame
-to `persona-message-daemon` on the engine's user-writable socket
+to `persona-message` on the engine's user-writable socket
 (`message.sock`, mode 0660), reads one typed reply frame, and prints one
 NOTA reply.
 
-The `persona-message-daemon` binary is the engine's user-writable ingress
-boundary: it binds `message.sock` (mode 0660, engine-owner group) and forwards
-typed Signal frames to `persona-router` over the internal `router.sock`. No
-durable state; no local message ledger. SO_PEERCRED origin stamping waits on
-the stamped-submission contract in `signal-persona-message`.
+The `persona-message` daemon (binary file `persona-message-daemon`) is the
+engine's user-writable ingress boundary: it binds `message.sock` (mode 0660,
+engine-owner group), stamps `MessageSubmission` frames with SO_PEERCRED-
+derived origin and ingress time, then forwards `StampedMessageSubmission`
+frames to `persona-router` over the internal `router.sock`. No durable
+state; no local message ledger.
 
 The supported input records are:
 
@@ -27,9 +29,8 @@ PERSONA_MESSAGE_SOCKET=/run/persona/engine-main/message.sock \
 
 The message component does not construct in-band proof material, read a local
 actor index, or write message ledgers, pending logs, terminal endpoints, or
-actor-registration files. Origin stamping is the daemon/router ingress
-boundary; as of this slice, the daemon forwards typed message frames and the
-stamped-submission contract is still pending in `signal-persona-message`.
+actor-registration files. Origin stamping is typed contract data at the
+daemon/router ingress boundary, not a caller-provided proof.
 
 Durable message acceptance, pending delivery, retry, owner approval, and
 terminal delivery state belong to `persona-router` and its downstream
