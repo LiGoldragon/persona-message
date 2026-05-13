@@ -63,6 +63,38 @@ flowchart LR
 - one NOTA reply projection per invocation;
 - no caller-identity resolution and no local actor index.
 
+## 1.5 · Daemon actor topology
+
+Per
+`~/primary/reports/designer/142-supervision-in-signal-persona-no-message-proxy-daemon.md` §3.3
+and
+`~/primary/reports/designer/143-prototype-readiness-gap-audit.md` §4.8:
+
+```mermaid
+flowchart TB
+    root["MessageDaemonRoot<br/>(Kameo runtime root)"]
+    sup["SupervisionPhase<br/>(answers signal-persona supervision relation)"]
+    listener["UserSocketListener<br/>(binds message.sock 0660;<br/>accepts CLI connections)"]
+    stamper["OriginStamper<br/>(mints MessageOrigin::External from SO_PEERCRED)"]
+    router_client["RouterClient<br/>(connects to router.sock 0600;<br/>forwards Signal frames)"]
+
+    root --> sup
+    root --> listener
+    listener --> stamper
+    stamper --> router_client
+```
+
+Five actors, all data-bearing per `~/primary/skills/kameo.md`'s `Self IS
+the actor` rule. The daemon is stateless across CLI requests — no redb, no
+durable message ledger. It reads its `signal-persona::SpawnEnvelope` at
+startup, binds `message.sock` at mode 0660 with the engine-owner group,
+and proceeds.
+
+The CLI surface (`message` binary) connects to `message.sock` like any
+other client; the daemon's accept loop tags each connection's origin from
+SO_PEERCRED before forwarding the typed `StampedMessageSubmission` to
+`persona-router` over the internal `router.sock`.
+
 ## 2 · State and Ownership
 
 The proxy owns no durable message state. It requires
