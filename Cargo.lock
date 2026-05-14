@@ -341,7 +341,7 @@ dependencies = [
 [[package]]
 name = "nota-derive"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#0d1c24086ae585c84ad92317bb8c463b8cc95697"
+source = "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#e24e50afe110810db50a7eb8f9a7963c6761c0af"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "signal-core"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/signal-core.git#9f4e20b4917aa1655004b3701ecbf5bce0eac071"
+source = "git+https://github.com/LiGoldragon/signal-core.git#fddfe8a69029bb1a20200b60da6cf7d4d021b3ae"
 dependencies = [
  "nota-codec",
  "rkyv",
@@ -560,17 +560,18 @@ dependencies = [
 [[package]]
 name = "signal-persona"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/signal-persona.git#44e1435bbe236751fc8a61ac081d526fe5938392"
+source = "git+https://github.com/LiGoldragon/signal-persona.git#6baee1abcafbfc1e84e5ecc4a51292d959c4bd15"
 dependencies = [
  "nota-codec",
  "rkyv",
  "signal-core",
+ "signal-persona-auth",
 ]
 
 [[package]]
 name = "signal-persona-auth"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/signal-persona-auth.git#0f7d30980e9ede37e4547a8ca53cd5aa9d23321f"
+source = "git+https://github.com/LiGoldragon/signal-persona-auth.git#b62016a90ec9e1f3af5dd064568be3c33756203e"
 dependencies = [
  "nota-codec",
  "rkyv",
@@ -580,7 +581,7 @@ dependencies = [
 [[package]]
 name = "signal-persona-message"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/signal-persona-message.git#1f2424248da356b40501602028d424f925e471cd"
+source = "git+https://github.com/LiGoldragon/signal-persona-message.git#a9e92d8a3a80dc461105ef47ba9adf263705210a"
 dependencies = [
  "nota-codec",
  "rkyv",

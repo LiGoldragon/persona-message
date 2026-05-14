@@ -6,7 +6,7 @@ use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
 use persona_message::supervision::{
     SupervisionFrameCodec, SupervisionListener, SupervisionProfile, SupervisionSocketMode,
 };
-use signal_core::{FrameBody, Reply, Request, SemaVerb};
+use signal_core::{FrameBody, Reply, Request, SignalVerb};
 use signal_persona::{
     ComponentHealth, ComponentHealthQuery, ComponentHello, ComponentKind, ComponentName,
     ComponentReadinessQuery, SupervisionFrame, SupervisionProtocolVersion, SupervisionReply,
@@ -151,7 +151,7 @@ impl FakeRouter {
             let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
                 panic!("expected signal request frame");
             };
-            assert_eq!(verb, SemaVerb::Assert);
+            assert_eq!(verb, payload.signal_verb());
             codec
                 .write_frame(&mut stream, &reply.frame)
                 .expect("router reply writes");
@@ -181,6 +181,21 @@ fn message_daemon_applies_spawn_envelope_socket_mode() {
         & 0o777;
 
     assert_eq!(mode, 0o660);
+}
+
+#[test]
+fn message_frame_codec_rejects_mismatched_signal_verb() {
+    let frame = Frame::new(FrameBody::Request(Request::unchecked_operation(
+        SignalVerb::Assert,
+        MessageRequest::InboxQuery(signal_persona_message::InboxQuery {
+            recipient: signal_persona_message::MessageRecipient::new("operator"),
+        }),
+    )));
+    let error = SignalRouterFrameCodec::default()
+        .request_from_frame(frame)
+        .expect_err("mismatched verb is rejected");
+
+    assert!(error.to_string().contains("signal verb mismatch"));
 }
 
 #[test]
@@ -423,7 +438,7 @@ fn input_rejects_unknown_record_heads() {
 }
 
 fn send_supervision_request(stream: &mut UnixStream, request: SupervisionRequest) {
-    let frame = SupervisionFrame::new(FrameBody::Request(Request::assert(request)));
+    let frame = SupervisionFrame::new(FrameBody::Request(Request::from_payload(request)));
     std::io::Write::write_all(
         stream,
         frame

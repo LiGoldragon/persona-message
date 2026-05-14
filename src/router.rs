@@ -135,12 +135,18 @@ impl SignalRouterFrameCodec {
     }
 
     pub fn request_frame(&self, request: MessageRequest) -> Frame {
-        Frame::new(FrameBody::Request(Request::assert(request)))
+        Frame::new(FrameBody::Request(Request::from_payload(request)))
     }
 
     pub fn request_from_frame(&self, frame: Frame) -> Result<MessageRequest> {
         match frame.into_body() {
-            FrameBody::Request(Request::Operation { payload, .. }) => Ok(payload),
+            FrameBody::Request(request) => {
+                request
+                    .into_payload_checked()
+                    .map_err(|error| Error::UnexpectedDaemonInput {
+                        got: error.to_string(),
+                    })
+            }
             other => Err(Error::UnexpectedDaemonInput {
                 got: format!("{other:?}"),
             }),
