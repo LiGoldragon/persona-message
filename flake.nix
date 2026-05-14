@@ -129,6 +129,8 @@
             context.cargoTest "command_line_inbox_routes_signal_frame_without_reading_local_ledger";
           message-cli-requires-message-socket =
             context.cargoTest "command_line_send_requires_message_socket";
+          message-daemon-applies-spawn-envelope-socket-mode =
+            context.cargoTest "message_daemon_applies_spawn_envelope_socket_mode";
           persona-message-daemon-forwards-cli-signal-frame-to-router-socket =
             context.cargoTest "persona_message_daemon_forwards_cli_signal_frame_to_router_socket";
         }

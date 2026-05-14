@@ -1,11 +1,14 @@
 use nota_codec::Error;
 use persona_message::command::{CommandLine, Input};
+use persona_message::daemon::{MessageDaemon, MessageDaemonInput, SocketMode};
 use persona_message::router::SignalRouterFrameCodec;
+use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
 use signal_core::{FrameBody, Reply, Request, SemaVerb};
 use signal_persona_message::{
     Frame, InboxEntry, InboxListing, MessageBody, MessageKind, MessageReply, MessageRequest,
     MessageSender, MessageSlot, SubmissionAcceptance,
 };
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -143,6 +146,29 @@ impl FakeRouter {
             RecordedFrame { request: payload }
         })
     }
+}
+
+#[test]
+fn message_daemon_applies_spawn_envelope_socket_mode() {
+    let fixture = MessageFixture::new();
+    let message_socket_path = fixture.message_socket_path();
+    let router_socket_path = fixture.router_socket_path();
+    let daemon = MessageDaemon::from_input(MessageDaemonInput {
+        message_socket: SignalMessageSocket::from_path(message_socket_path.clone()),
+        router_socket: SignalRouterSocket::from_path(router_socket_path),
+    })
+    .with_socket_mode(SocketMode::from_octal(0o660));
+
+    let _listener = daemon
+        .bind_listener()
+        .expect("message daemon binds listener with managed mode");
+    let mode = std::fs::metadata(message_socket_path)
+        .expect("message socket metadata is readable")
+        .permissions()
+        .mode()
+        & 0o777;
+
+    assert_eq!(mode, 0o660);
 }
 
 #[test]

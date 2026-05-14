@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::io::BufReader;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -83,6 +84,7 @@ impl MessageDaemonCommandLine {
 pub struct MessageDaemon {
     message_socket: SignalMessageSocket,
     router_socket: SignalRouterSocket,
+    socket_mode: Option<SocketMode>,
 }
 
 impl MessageDaemon {
@@ -90,15 +92,17 @@ impl MessageDaemon {
         Self {
             message_socket: input.message_socket,
             router_socket: input.router_socket,
+            socket_mode: SocketMode::from_environment(),
         }
     }
 
+    pub fn with_socket_mode(mut self, socket_mode: SocketMode) -> Self {
+        self.socket_mode = Some(socket_mode);
+        self
+    }
+
     pub fn run(self) -> Result<()> {
-        if let Some(parent) = self.message_socket.path().parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let _ = std::fs::remove_file(self.message_socket.path());
-        let listener = UnixListener::bind(self.message_socket.path())?;
+        let listener = self.bind_listener()?;
         let runtime = tokio::runtime::Runtime::new()?;
         let root = runtime.block_on(MessageDaemonRoot::start_root(MessageDaemonRootInput {
             router_socket: self.router_socket,
@@ -112,6 +116,21 @@ impl MessageDaemon {
             Self::handle_connection(&runtime, &root, stream)?;
         }
         Ok(())
+    }
+
+    pub fn bind_listener(&self) -> Result<UnixListener> {
+        if let Some(parent) = self.message_socket.path().parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let _ = std::fs::remove_file(self.message_socket.path());
+        let listener = UnixListener::bind(self.message_socket.path())?;
+        if let Some(socket_mode) = self.socket_mode {
+            std::fs::set_permissions(
+                self.message_socket.path(),
+                std::fs::Permissions::from_mode(socket_mode.as_octal()),
+            )?;
+        }
+        Ok(listener)
     }
 
     fn handle_connection(
@@ -136,6 +155,26 @@ impl MessageDaemon {
         };
         connection.write_reply(reply)?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SocketMode(u32);
+
+impl SocketMode {
+    pub const fn from_octal(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub fn from_environment() -> Option<Self> {
+        std::env::var("PERSONA_SOCKET_MODE")
+            .ok()
+            .and_then(|value| u32::from_str_radix(value.as_str(), 8).ok())
+            .map(Self::from_octal)
+    }
+
+    pub const fn as_octal(self) -> u32 {
+        self.0
     }
 }
 

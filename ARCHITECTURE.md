@@ -16,8 +16,9 @@ component.*
   `persona-message-daemon`) — a small Kameo daemon supervised
   by `persona-daemon` as the engine's message ingress
   component. Binds `message.sock` at mode 0660 with the
-  engine-owner group; stamps `MessageSubmission` frames with
-  SO_PEERCRED-derived origin and ingress time; forwards
+  engine-owner group by applying the `PERSONA_SOCKET_MODE` value
+  from the Persona spawn envelope; stamps `MessageSubmission`
+  frames with SO_PEERCRED-derived origin and ingress time; forwards
   `StampedMessageSubmission` frames to `persona-router`'s
   internal socket (`router.sock`, 0600).
 
@@ -131,6 +132,8 @@ This repo does not own:
 - Supported input variants are `Send` and `Inbox`.
 - The message daemon socket is mandatory for the CLI.
 - The router socket is mandatory for the daemon.
+- The daemon applies the managed spawn-envelope socket mode to
+  `message.sock` before accepting client traffic.
 - CLI and daemon outbound traffic are length-prefixed rkyv Signal frames.
 - Sender identity is absent from the CLI payload and absent from frame auth.
 - Provenance is typed in `StampedMessageSubmission`; the daemon mints it from
@@ -158,6 +161,7 @@ tests/                         ingress and architectural-truth tests
 | The router Signal path cannot create a local message ledger. | `nix flake check .#message-cli-sends-router-signal-without-local-ledger` |
 | Inbox reads come from the router, not a local ledger. | `nix flake check .#message-cli-inbox-uses-router-signal-not-local-ledger` |
 | The message daemon socket is mandatory for the CLI. | `nix flake check .#message-cli-requires-message-socket` |
+| The daemon applies the managed spawn-envelope socket mode. | `nix flake check .#message-daemon-applies-spawn-envelope-socket-mode` |
 | The daemon stamps and forwards CLI Signal frames to the router socket. | `nix flake check .#persona-message-daemon-forwards-cli-signal-frame-to-router-socket` |
 | The component does not construct in-band proof material. | `nix flake check .#message-component-cannot-own-local-ledger` |
 | Retired terminal-brand vocabulary cannot return. | `nix flake check .#message-runtime-cannot-reference-retired-terminal-brand` |
