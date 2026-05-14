@@ -21,11 +21,9 @@ component.*
   `StampedMessageSubmission` frames to `persona-router`'s
   internal socket (`router.sock`, 0600).
 
-There is no `MessageProxy` component here. Per
-`~/primary/reports/designer/142-supervision-in-signal-persona-no-message-proxy-daemon.md`,
-the supervised first-stack component is named
-`persona-message`; the long-lived binary is
-`persona-message-daemon`.
+There is no `MessageProxy` component here. The supervised
+first-stack component is named `persona-message`; the long-lived
+binary is `persona-message-daemon`.
 
 > **Scope.** Any "sema" reference in this doc means today's `sema`
 > library (rename pending → `sema-db`). The eventual `Sema` is broader; today's
@@ -66,11 +64,6 @@ flowchart LR
 - no caller-provided identity and no local actor index.
 
 ## 1.5 · Daemon actor topology
-
-Per
-`~/primary/reports/designer/142-supervision-in-signal-persona-no-message-proxy-daemon.md` §3.3
-and
-`~/primary/reports/designer/143-prototype-readiness-gap-audit.md` §4.8:
 
 ```mermaid
 flowchart TB
