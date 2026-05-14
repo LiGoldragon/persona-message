@@ -262,8 +262,21 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "futures",
+ "kameo_macros",
  "serde",
  "tokio",
+]
+
+[[package]]
+name = "kameo_macros"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16c9002c9ecd16e1636f566c0bf62db48e70d86ed0d0a91b398955e883217a23"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

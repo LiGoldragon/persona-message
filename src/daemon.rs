@@ -19,6 +19,7 @@ use crate::error::{Error, Result};
 use crate::router::{
     SignalMessageSocket, SignalRouterClient, SignalRouterFrameCodec, SignalRouterSocket,
 };
+use crate::supervision::{SupervisionListener, SupervisionProfile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageDaemonCommandLine {
@@ -103,6 +104,9 @@ impl MessageDaemon {
 
     pub fn run(self) -> Result<()> {
         let listener = self.bind_listener()?;
+        let _supervision = SupervisionListener::from_environment(SupervisionProfile::message())
+            .map(SupervisionListener::spawn)
+            .transpose()?;
         let runtime = tokio::runtime::Runtime::new()?;
         let root = runtime.block_on(MessageDaemonRoot::start_root(MessageDaemonRootInput {
             router_socket: self.router_socket,

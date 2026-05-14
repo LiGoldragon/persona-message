@@ -3,13 +3,21 @@ use persona_message::command::{CommandLine, Input};
 use persona_message::daemon::{MessageDaemon, MessageDaemonInput, SocketMode};
 use persona_message::router::SignalRouterFrameCodec;
 use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
+use persona_message::supervision::{
+    SupervisionFrameCodec, SupervisionListener, SupervisionProfile, SupervisionSocketMode,
+};
 use signal_core::{FrameBody, Reply, Request, SemaVerb};
+use signal_persona::{
+    ComponentHealth, ComponentHealthQuery, ComponentHello, ComponentKind, ComponentName,
+    ComponentReadinessQuery, SupervisionFrame, SupervisionProtocolVersion, SupervisionReply,
+    SupervisionRequest,
+};
 use signal_persona_message::{
     Frame, InboxEntry, InboxListing, MessageBody, MessageKind, MessageReply, MessageRequest,
     MessageSender, MessageSlot, SubmissionAcceptance,
 };
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -29,6 +37,10 @@ impl MessageFixture {
 
     fn message_socket_path(&self) -> PathBuf {
         self.directory.path().join("message.signal.sock")
+    }
+
+    fn supervision_socket_path(&self) -> PathBuf {
+        self.directory.path().join("message.supervision.sock")
     }
 
     fn start_path(&self) -> PathBuf {
@@ -169,6 +181,68 @@ fn message_daemon_applies_spawn_envelope_socket_mode() {
         & 0o777;
 
     assert_eq!(mode, 0o660);
+}
+
+#[test]
+fn message_daemon_answers_component_supervision_relation() {
+    let fixture = MessageFixture::new();
+    let supervision_socket = fixture.supervision_socket_path();
+    let _supervision = SupervisionListener::new(
+        SupervisionProfile::message(),
+        supervision_socket.clone(),
+        SupervisionSocketMode::from_octal(0o600),
+    )
+    .spawn()
+    .expect("message supervision listener starts");
+
+    let mode = std::fs::metadata(&supervision_socket)
+        .expect("supervision socket metadata is readable")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+
+    let mut stream = UnixStream::connect(&supervision_socket).expect("client connects");
+    let codec = SupervisionFrameCodec::new(1024 * 1024);
+
+    send_supervision_request(
+        &mut stream,
+        SupervisionRequest::ComponentHello(ComponentHello {
+            expected_component: ComponentName::new("persona-message"),
+            expected_kind: ComponentKind::Message,
+            supervision_protocol_version: SupervisionProtocolVersion::new(1),
+        }),
+    );
+    let identity = codec.read_reply(&mut stream).expect("identity reply");
+    assert!(matches!(
+        identity,
+        SupervisionReply::ComponentIdentity(identity)
+            if identity.name.as_str() == "persona-message"
+                && identity.kind == ComponentKind::Message
+    ));
+
+    send_supervision_request(
+        &mut stream,
+        SupervisionRequest::ComponentReadinessQuery(ComponentReadinessQuery {
+            component: ComponentName::new("persona-message"),
+        }),
+    );
+    assert!(matches!(
+        codec.read_reply(&mut stream).expect("readiness reply"),
+        SupervisionReply::ComponentReady(_)
+    ));
+
+    send_supervision_request(
+        &mut stream,
+        SupervisionRequest::ComponentHealthQuery(ComponentHealthQuery {
+            component: ComponentName::new("persona-message"),
+        }),
+    );
+    assert!(matches!(
+        codec.read_reply(&mut stream).expect("health reply"),
+        SupervisionReply::ComponentHealthReport(report)
+            if report.health == ComponentHealth::Running
+    ));
 }
 
 #[test]
@@ -346,4 +420,16 @@ fn input_rejects_unknown_record_heads() {
         }
         other => panic!("expected unknown input kind, got {other:?}"),
     }
+}
+
+fn send_supervision_request(stream: &mut UnixStream, request: SupervisionRequest) {
+    let frame = SupervisionFrame::new(FrameBody::Request(Request::assert(request)));
+    std::io::Write::write_all(
+        stream,
+        frame
+            .encode_length_prefixed()
+            .expect("supervision request encodes")
+            .as_slice(),
+    )
+    .expect("supervision request writes");
 }

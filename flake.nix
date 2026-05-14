@@ -131,6 +131,8 @@
             context.cargoTest "command_line_send_requires_message_socket";
           message-daemon-applies-spawn-envelope-socket-mode =
             context.cargoTest "message_daemon_applies_spawn_envelope_socket_mode";
+          message-daemon-answers-component-supervision-relation =
+            context.cargoTest "message_daemon_answers_component_supervision_relation";
           persona-message-daemon-forwards-cli-signal-frame-to-router-socket =
             context.cargoTest "persona_message_daemon_forwards_cli_signal_frame_to_router_socket";
         }
