@@ -6,7 +6,10 @@ use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
 use persona_message::supervision::{
     SupervisionFrameCodec, SupervisionListener, SupervisionProfile, SupervisionSocketMode,
 };
-use signal_core::{FrameBody, Reply, Request, SignalVerb};
+use signal_core::{
+    ExchangeIdentifier, ExchangeLane, ExchangeSequence, FrameBody, NonEmpty, Operation, Request,
+    RequestPayload, RequestRejectionReason, SessionEpoch, SignalVerb,
+};
 use signal_persona::{
     ComponentHealth, ComponentHealthQuery, ComponentHello, ComponentKind, ComponentName,
     ComponentReadinessQuery, SupervisionFrame, SupervisionProtocolVersion, SupervisionReply,
@@ -96,31 +99,27 @@ impl MessageFixture {
 }
 
 struct RouterReply {
-    frame: Frame,
+    reply: MessageReply,
 }
 
 impl RouterReply {
     fn accepted(slot: u64) -> Self {
         Self {
-            frame: Frame::new(FrameBody::Reply(Reply::operation(
-                MessageReply::SubmissionAccepted(SubmissionAcceptance {
-                    message_slot: MessageSlot::new(slot),
-                }),
-            ))),
+            reply: MessageReply::SubmissionAccepted(SubmissionAcceptance {
+                message_slot: MessageSlot::new(slot),
+            }),
         }
     }
 
     fn inbox(sender: &str, body: &str) -> Self {
         Self {
-            frame: Frame::new(FrameBody::Reply(Reply::operation(
-                MessageReply::InboxListing(InboxListing {
-                    messages: vec![InboxEntry {
-                        message_slot: MessageSlot::new(3),
-                        sender: MessageSender::new(sender),
-                        body: MessageBody::new(body),
-                    }],
-                }),
-            ))),
+            reply: MessageReply::InboxListing(InboxListing {
+                messages: vec![InboxEntry {
+                    message_slot: MessageSlot::new(3),
+                    sender: MessageSender::new(sender),
+                    body: MessageBody::new(body),
+                }],
+            }),
         }
     }
 }
@@ -148,12 +147,18 @@ impl FakeRouter {
             let (mut stream, _) = self.listener.accept().expect("router accepts");
             let codec = SignalRouterFrameCodec::default();
             let frame = codec.read_frame(&mut stream).expect("router input reads");
-            let FrameBody::Request(Request::Operation { verb, payload }) = frame.into_body() else {
+            let FrameBody::Request { exchange, request } = frame.into_body() else {
                 panic!("expected signal request frame");
             };
+            let checked = request.into_checked().expect("router input checks");
+            let (operation, tail) = checked.operations.into_head_and_tail();
+            assert!(tail.is_empty());
+            let verb = operation.verb;
+            let payload = operation.payload;
             assert_eq!(verb, payload.signal_verb());
+            let frame = codec.reply_frame(exchange, verb, reply.reply);
             codec
-                .write_frame(&mut stream, &reply.frame)
+                .write_frame(&mut stream, &frame)
                 .expect("router reply writes");
             RecordedFrame { request: payload }
         })
@@ -185,17 +190,29 @@ fn message_daemon_applies_spawn_envelope_socket_mode() {
 
 #[test]
 fn message_frame_codec_rejects_mismatched_signal_verb() {
-    let frame = Frame::new(FrameBody::Request(Request::unchecked_operation(
+    let request = Request::from_operations(NonEmpty::single(Operation::new(
         SignalVerb::Assert,
         MessageRequest::InboxQuery(signal_persona_message::InboxQuery {
             recipient: signal_persona_message::MessageRecipient::new("operator"),
         }),
     )));
+    let frame = Frame::new(FrameBody::Request {
+        exchange: test_exchange(),
+        request,
+    });
     let error = SignalRouterFrameCodec::default()
         .request_from_frame(frame)
         .expect_err("mismatched verb is rejected");
 
-    assert!(error.to_string().contains("signal verb mismatch"));
+    match error {
+        persona_message::Error::InvalidSignalRequest { reason } => {
+            assert_eq!(
+                reason,
+                RequestRejectionReason::VerbPayloadMismatch { index: 0 }
+            );
+        }
+        other => panic!("expected typed signal request rejection, got {other:?}"),
+    }
 }
 
 #[test]
@@ -438,7 +455,10 @@ fn input_rejects_unknown_record_heads() {
 }
 
 fn send_supervision_request(stream: &mut UnixStream, request: SupervisionRequest) {
-    let frame = SupervisionFrame::new(FrameBody::Request(Request::from_payload(request)));
+    let frame = SupervisionFrame::new(FrameBody::Request {
+        exchange: test_exchange(),
+        request: Request::from_payload(request),
+    });
     std::io::Write::write_all(
         stream,
         frame
@@ -447,4 +467,12 @@ fn send_supervision_request(stream: &mut UnixStream, request: SupervisionRequest
             .as_slice(),
     )
     .expect("supervision request writes");
+}
+
+fn test_exchange() -> ExchangeIdentifier {
+    ExchangeIdentifier::new(
+        SessionEpoch::new(0),
+        ExchangeLane::Connector,
+        ExchangeSequence::first(),
+    )
 }

@@ -17,7 +17,8 @@ use signal_persona_message::{
 
 use crate::error::{Error, Result};
 use crate::router::{
-    SignalMessageSocket, SignalRouterClient, SignalRouterFrameCodec, SignalRouterSocket,
+    ReceivedMessageRequest, SignalMessageSocket, SignalRouterClient, SignalRouterFrameCodec,
+    SignalRouterSocket,
 };
 use crate::supervision::{SupervisionListener, SupervisionProfile};
 
@@ -144,7 +145,8 @@ impl MessageDaemon {
     ) -> Result<()> {
         let mut connection = MessageDaemonConnection::from_stream(stream)?;
         let peer = connection.peer_credentials();
-        let request = connection.read_request()?;
+        let received = connection.read_request()?;
+        let request = received.request.clone();
         let reply = match runtime
             .block_on(async { root.ask(ForwardMessageRequest { request, peer }).await })
         {
@@ -157,7 +159,7 @@ impl MessageDaemon {
                 });
             }
         };
-        connection.write_reply(reply)?;
+        connection.write_reply(received, reply)?;
         Ok(())
     }
 }
@@ -208,15 +210,19 @@ impl MessageDaemonConnection {
         self.peer_credentials
     }
 
-    pub fn read_request(&mut self) -> Result<MessageRequest> {
+    pub fn read_request(&mut self) -> Result<ReceivedMessageRequest> {
         let frame = self.codec.read_frame(&mut self.stream)?;
         self.codec.request_from_frame(frame)
     }
 
-    pub fn write_reply(&mut self, reply: MessageReply) -> Result<()> {
-        let frame = signal_persona_message::Frame::new(signal_core::FrameBody::Reply(
-            signal_core::Reply::operation(reply),
-        ));
+    pub fn write_reply(
+        &mut self,
+        request: ReceivedMessageRequest,
+        reply: MessageReply,
+    ) -> Result<()> {
+        let frame = self
+            .codec
+            .reply_frame(request.exchange, request.verb, reply);
         self.codec.write_frame(self.stream.get_mut(), &frame)
     }
 }

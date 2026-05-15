@@ -37,6 +37,11 @@ pub enum Error {
     #[error("daemon input was not a request frame: {got}")]
     UnexpectedDaemonInput { got: String },
 
+    #[error("daemon input failed Signal request checks: {reason}")]
+    InvalidSignalRequest {
+        reason: signal_core::RequestRejectionReason,
+    },
+
     #[error("could not read peer credentials for message socket")]
     PeerCredentials,
 

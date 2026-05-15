@@ -2,7 +2,10 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
-use signal_core::{FrameBody, Request};
+use signal_core::{
+    ExchangeIdentifier, ExchangeLane, ExchangeSequence, FrameBody, NonEmpty, Reply as SignalReply,
+    Request, SessionEpoch, SignalVerb, SubReply,
+};
 use signal_persona_message::{Frame, MessageReply, MessageRequest};
 
 use crate::error::{Error, Result};
@@ -71,10 +74,11 @@ impl SignalMessageClient {
 
     pub fn submit(&self, request: MessageRequest) -> Result<MessageReply> {
         let mut stream = UnixStream::connect(&self.socket.path)?;
-        let frame = self.codec.request_frame(request);
+        let exchange = self.codec.connector_exchange();
+        let frame = self.codec.request_frame_with_exchange(exchange, request);
         self.codec.write_frame(&mut stream, &frame)?;
         let reply = self.codec.read_frame(&mut stream)?;
-        self.codec.reply_from_frame(reply)
+        self.codec.reply_from_frame_for_exchange(reply, exchange)
     }
 }
 
@@ -94,10 +98,11 @@ impl SignalRouterClient {
 
     pub fn submit(&self, request: MessageRequest) -> Result<MessageReply> {
         let mut stream = UnixStream::connect(&self.socket.path)?;
-        let frame = self.codec.request_frame(request);
+        let exchange = self.codec.connector_exchange();
+        let frame = self.codec.request_frame_with_exchange(exchange, request);
         self.codec.write_frame(&mut stream, &frame)?;
         let reply = self.codec.read_frame(&mut stream)?;
-        self.codec.reply_from_frame(reply)
+        self.codec.reply_from_frame_for_exchange(reply, exchange)
     }
 }
 
@@ -134,18 +139,49 @@ impl SignalRouterFrameCodec {
         Ok(())
     }
 
-    pub fn request_frame(&self, request: MessageRequest) -> Frame {
-        Frame::new(FrameBody::Request(Request::from_payload(request)))
+    pub fn connector_exchange(&self) -> ExchangeIdentifier {
+        ExchangeIdentifier::new(
+            SessionEpoch::new(0),
+            ExchangeLane::Connector,
+            ExchangeSequence::first(),
+        )
     }
 
-    pub fn request_from_frame(&self, frame: Frame) -> Result<MessageRequest> {
+    pub fn request_frame(&self, request: MessageRequest) -> Frame {
+        self.request_frame_with_exchange(self.connector_exchange(), request)
+    }
+
+    pub fn request_frame_with_exchange(
+        &self,
+        exchange: ExchangeIdentifier,
+        request: MessageRequest,
+    ) -> Frame {
+        Frame::new(FrameBody::Request {
+            exchange,
+            request: Request::from_payload(request),
+        })
+    }
+
+    pub fn request_from_frame(&self, frame: Frame) -> Result<ReceivedMessageRequest> {
         match frame.into_body() {
-            FrameBody::Request(request) => {
-                request
-                    .into_payload_checked()
-                    .map_err(|error| Error::UnexpectedDaemonInput {
-                        got: error.to_string(),
-                    })
+            FrameBody::Request { exchange, request } => {
+                let checked = request
+                    .into_checked()
+                    .map_err(|(reason, _)| Error::InvalidSignalRequest { reason })?;
+                let (operation, tail) = checked.operations.into_head_and_tail();
+                if !tail.is_empty() {
+                    return Err(Error::UnexpectedDaemonInput {
+                        got: format!(
+                            "expected one message operation, got {}",
+                            tail.len().saturating_add(1)
+                        ),
+                    });
+                }
+                Ok(ReceivedMessageRequest {
+                    exchange,
+                    verb: operation.verb,
+                    request: operation.payload,
+                })
             }
             other => Err(Error::UnexpectedDaemonInput {
                 got: format!("{other:?}"),
@@ -153,11 +189,70 @@ impl SignalRouterFrameCodec {
         }
     }
 
+    pub fn reply_frame(
+        &self,
+        exchange: ExchangeIdentifier,
+        verb: SignalVerb,
+        reply: MessageReply,
+    ) -> Frame {
+        Frame::new(FrameBody::Reply {
+            exchange,
+            reply: SignalReply::completed(NonEmpty::single(SubReply::Ok {
+                verb,
+                payload: reply,
+            })),
+        })
+    }
+
     pub fn reply_from_frame(&self, frame: Frame) -> Result<MessageReply> {
+        self.reply_from_frame_without_exchange_check(frame)
+    }
+
+    pub fn reply_from_frame_for_exchange(
+        &self,
+        frame: Frame,
+        expected: ExchangeIdentifier,
+    ) -> Result<MessageReply> {
         match frame.into_body() {
-            FrameBody::Reply(signal_core::Reply::Operation(reply)) => Ok(reply),
+            FrameBody::Reply { exchange, reply } if exchange == expected => {
+                self.payload_from_reply(reply)
+            }
+            FrameBody::Reply { exchange, .. } => Err(Error::UnexpectedRouterReply {
+                got: format!("reply exchange {exchange:?} did not match {expected:?}"),
+            }),
             other => Err(Error::UnexpectedRouterReply {
                 got: format!("{other:?}"),
+            }),
+        }
+    }
+
+    fn reply_from_frame_without_exchange_check(&self, frame: Frame) -> Result<MessageReply> {
+        match frame.into_body() {
+            FrameBody::Reply { reply, .. } => self.payload_from_reply(reply),
+            other => Err(Error::UnexpectedRouterReply {
+                got: format!("{other:?}"),
+            }),
+        }
+    }
+
+    fn payload_from_reply(&self, reply: SignalReply<MessageReply>) -> Result<MessageReply> {
+        match reply {
+            SignalReply::Accepted { per_operation, .. } => {
+                let (sub_reply, tail) = per_operation.into_head_and_tail();
+                if !tail.is_empty() {
+                    return Err(Error::UnexpectedRouterReply {
+                        got: format!("expected one reply operation, got {}", tail.len() + 1),
+                    });
+                }
+                match sub_reply {
+                    SubReply::Ok { payload, .. } => Ok(payload),
+                    other => Err(Error::UnexpectedRouterReply {
+                        got: format!("{other:?}"),
+                    }),
+                }
+            }
+            SignalReply::Rejected { reason } => Err(Error::UnexpectedRouterReply {
+                got: format!("{reason:?}"),
             }),
         }
     }
@@ -167,6 +262,13 @@ impl Default for SignalRouterFrameCodec {
     fn default() -> Self {
         Self::new(1024 * 1024)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceivedMessageRequest {
+    pub exchange: ExchangeIdentifier,
+    pub verb: SignalVerb,
+    pub request: MessageRequest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

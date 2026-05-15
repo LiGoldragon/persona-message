@@ -133,6 +133,8 @@
             context.cargoTest "message_daemon_applies_spawn_envelope_socket_mode";
           message-daemon-answers-component-supervision-relation =
             context.cargoTest "message_daemon_answers_component_supervision_relation";
+          message-frame-codec-rejects-mismatched-signal-verb =
+            context.cargoTest "message_frame_codec_rejects_mismatched_signal_verb";
           persona-message-daemon-forwards-cli-signal-frame-to-router-socket =
             context.cargoTest "persona_message_daemon_forwards_cli_signal_frame_to_router_socket";
         }

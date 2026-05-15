@@ -111,6 +111,8 @@ This repo owns:
 - projection from NOTA `Send` / `Inbox` to `signal-persona-message`;
 - projection from `signal-persona-message` replies back to NOTA;
 - length-prefixed Signal frame transport from CLI to `message.sock`;
+- frame-level exchange echoing for the current one-operation request/reply
+  path;
 - daemon stamping from `MessageSubmission` to `StampedMessageSubmission`;
 - daemon forwarding from `message.sock` to the configured router socket.
 
@@ -135,6 +137,13 @@ This repo does not own:
 - The daemon applies the managed spawn-envelope socket mode to
   `message.sock` before accepting client traffic.
 - CLI and daemon outbound traffic are length-prefixed rkyv Signal frames.
+- Request/reply matching is frame-level: every request frame carries an
+  `ExchangeIdentifier`, and every reply frame echoes the same identifier.
+- The current message ingress path is deliberately one operation per request.
+  Multi-operation request execution belongs in the shared Signal runtime slice,
+  not in this component's ad hoc codec.
+- A mismatched outer Signal verb and request payload is rejected as typed
+  `RequestRejectionReason`, not by string parsing.
 - Sender identity is absent from the CLI payload and absent from frame auth.
 - Provenance is typed in `StampedMessageSubmission`; the daemon mints it from
   SO_PEERCRED and never accepts it from the CLI payload.
@@ -163,6 +172,7 @@ tests/                         ingress and architectural-truth tests
 | The message daemon socket is mandatory for the CLI. | `nix flake check .#message-cli-requires-message-socket` |
 | The daemon applies the managed spawn-envelope socket mode. | `nix flake check .#message-daemon-applies-spawn-envelope-socket-mode` |
 | The daemon stamps and forwards CLI Signal frames to the router socket. | `nix flake check .#persona-message-daemon-forwards-cli-signal-frame-to-router-socket` |
+| Mismatched Signal verb/payload pairs are rejected by typed Signal reason. | `nix flake check .#message-frame-codec-rejects-mismatched-signal-verb` |
 | The component does not construct in-band proof material. | `nix flake check .#message-component-cannot-own-local-ledger` |
 | Retired terminal-brand vocabulary cannot return. | `nix flake check .#message-runtime-cannot-reference-retired-terminal-brand` |
 | Local ledger and endpoint surfaces cannot return. | `nix flake check .#message-component-cannot-own-local-ledger` |
