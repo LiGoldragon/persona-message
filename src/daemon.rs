@@ -3,13 +3,15 @@ use std::io::BufReader;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::{Infallible, SendError};
 use kameo::message::{Context, Message};
+use nota_codec::{Decoder, NotaDecode};
 use signal_persona::TimestampNanos;
-use signal_persona_auth::{ConnectionClass, MessageOrigin, UnixUserId};
+use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
 use signal_persona_message::{
     MessageOperationKind, MessageReply, MessageRequest, MessageRequestUnimplemented,
     MessageUnimplementedReason, StampedMessageSubmission,
@@ -109,8 +111,10 @@ impl MessageDaemon {
             .map(SupervisionListener::spawn)
             .transpose()?;
         let runtime = tokio::runtime::Runtime::new()?;
+        let stamper = MessageOriginStamper::from_environment()?;
         let root = runtime.block_on(MessageDaemonRoot::start_root(MessageDaemonRootInput {
             router_socket: self.router_socket,
+            stamper,
         }));
         eprintln!(
             "persona-message-daemon socket={}",
@@ -238,7 +242,7 @@ impl MessageDaemonRoot {
     pub fn new(input: MessageDaemonRootInput) -> Self {
         Self {
             router: input.router_socket.client(),
-            stamper: MessageOriginStamper::for_current_user(),
+            stamper: input.stamper,
             forwarded_count: 0,
         }
     }
@@ -247,7 +251,11 @@ impl MessageDaemonRoot {
         Self::spawn(Self::new(input))
     }
 
-    fn forward(&mut self, request: MessageRequest, peer: PeerCredentials) -> Result<MessageReply> {
+    fn forward(
+        &mut self,
+        request: MessageRequest,
+        peer: PeerCredentials,
+    ) -> Result<MessageReply> {
         match self.stamper.stamp_request(request, peer)? {
             ForwardDecision::Forward(request) => {
                 let reply = self.router.submit(request)?;
@@ -262,6 +270,7 @@ impl MessageDaemonRoot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageDaemonRootInput {
     pub router_socket: SignalRouterSocket,
+    pub stamper: MessageOriginStamper,
 }
 
 impl Actor for MessageDaemonRoot {
@@ -299,6 +308,10 @@ pub struct PeerCredentials {
 }
 
 impl PeerCredentials {
+    pub fn from_user_id(user_id: UnixUserId) -> Self {
+        Self { user_id }
+    }
+
     pub fn from_stream(stream: &UnixStream) -> Result<Self> {
         let mut credentials = libc::ucred {
             pid: 0,
@@ -324,15 +337,39 @@ impl PeerCredentials {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageOriginStamper {
-    engine_owner_user_id: UnixUserId,
+    engine_owner_identity: OwnerIdentity,
 }
 
 impl MessageOriginStamper {
     pub fn for_current_user() -> Self {
+        Self::from_owner_identity(OwnerIdentity::UnixUser(UnixUserId::new(unsafe {
+            libc::geteuid()
+        })))
+    }
+
+    pub fn from_environment() -> Result<Self> {
+        if let Some(path) = std::env::var_os("PERSONA_SPAWN_ENVELOPE") {
+            return Self::from_spawn_envelope_path(path);
+        }
+        Ok(Self::for_current_user())
+    }
+
+    pub fn from_spawn_envelope_path(path: impl AsRef<Path>) -> Result<Self> {
+        let text = std::fs::read_to_string(path)?;
+        let mut decoder = Decoder::new(&text);
+        let envelope = signal_persona::SpawnEnvelope::decode(&mut decoder)?;
+        Ok(Self::from_spawn_envelope(envelope))
+    }
+
+    pub fn from_spawn_envelope(envelope: signal_persona::SpawnEnvelope) -> Self {
+        Self::from_owner_identity(envelope.owner_identity)
+    }
+
+    pub fn from_owner_identity(engine_owner_identity: OwnerIdentity) -> Self {
         Self {
-            engine_owner_user_id: UnixUserId::new(unsafe { libc::geteuid() }),
+            engine_owner_identity,
         }
     }
 
@@ -362,10 +399,11 @@ impl MessageOriginStamper {
     }
 
     fn origin_for_peer(&self, peer: PeerCredentials) -> MessageOrigin {
-        if peer.user_id == self.engine_owner_user_id {
-            MessageOrigin::External(ConnectionClass::Owner)
-        } else {
-            MessageOrigin::External(ConnectionClass::NonOwnerUser(peer.user_id))
+        match &self.engine_owner_identity {
+            OwnerIdentity::UnixUser(user_id) if peer.user_id == *user_id => {
+                MessageOrigin::External(ConnectionClass::Owner)
+            }
+            _ => MessageOrigin::External(ConnectionClass::NonOwnerUser(peer.user_id)),
         }
     }
 

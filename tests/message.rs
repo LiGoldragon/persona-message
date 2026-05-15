@@ -1,6 +1,9 @@
-use nota_codec::Error;
+use nota_codec::{Encoder, Error, NotaEncode};
 use persona_message::command::{CommandLine, Input};
-use persona_message::daemon::{MessageDaemon, MessageDaemonInput, SocketMode};
+use persona_message::daemon::{
+    ForwardDecision, MessageDaemon, MessageDaemonInput, MessageOriginStamper, PeerCredentials,
+    SocketMode,
+};
 use persona_message::router::SignalRouterFrameCodec;
 use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
 use persona_message::supervision::{
@@ -17,8 +20,10 @@ use signal_persona::{
 };
 use signal_persona_message::{
     Frame, FrameBody as MessageFrameBody, InboxEntry, InboxListing, MessageBody, MessageKind,
-    MessageReply, MessageRequest, MessageSender, MessageSlot, SubmissionAcceptance,
+    MessageRecipient, MessageReply, MessageRequest, MessageSender, MessageSlot,
+    SubmissionAcceptance,
 };
+use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -57,6 +62,45 @@ impl MessageFixture {
             .join(["messages", ".nota.log"].concat())
     }
 
+    fn spawn_envelope_path(&self) -> PathBuf {
+        self.directory.path().join("message.envelope")
+    }
+
+    fn write_spawn_envelope(&self, owner_identity: OwnerIdentity) -> PathBuf {
+        let path = self.spawn_envelope_path();
+        let envelope = signal_persona::SpawnEnvelope {
+            engine_id: signal_persona_auth::EngineId::new("test"),
+            component_kind: signal_persona::ComponentKind::Message,
+            component_name: signal_persona_auth::ComponentName::Message,
+            owner_identity,
+            state_dir: signal_persona::WirePath::new(self.directory.path().display().to_string()),
+            domain_socket_path: signal_persona::WirePath::new(
+                self.message_socket_path().display().to_string(),
+            ),
+            domain_socket_mode: signal_persona::SocketMode::new(0o660),
+            supervision_socket_path: signal_persona::WirePath::new(
+                self.supervision_socket_path().display().to_string(),
+            ),
+            supervision_socket_mode: signal_persona::SocketMode::new(0o600),
+            peer_sockets: vec![signal_persona::PeerSocket {
+                component_name: signal_persona_auth::ComponentName::Router,
+                domain_socket_path: signal_persona::WirePath::new(
+                    self.router_socket_path().display().to_string(),
+                ),
+            }],
+            manager_socket: signal_persona::WirePath::new(
+                self.directory.path().join("persona.sock").display().to_string(),
+            ),
+            supervision_protocol_version: signal_persona::SupervisionProtocolVersion::new(1),
+        };
+        let mut encoder = Encoder::new();
+        envelope
+            .encode(&mut encoder)
+            .expect("spawn envelope encodes");
+        std::fs::write(&path, encoder.into_string()).expect("spawn envelope writes");
+        path
+    }
+
     fn spawn_message_after_start(
         &self,
         start_path: &Path,
@@ -78,11 +122,12 @@ impl MessageFixture {
         command.spawn().expect("message shell starts")
     }
 
-    fn spawn_daemon_after_router_start(
+    fn spawn_daemon_after_router_start_with_spawn_envelope(
         &self,
         start_path: &Path,
         message_socket_path: &Path,
         router_socket_path: &Path,
+        spawn_envelope_path: Option<&Path>,
     ) -> std::process::Child {
         let mut command = Command::new("sh");
         command.arg("-c").arg(format!(
@@ -93,6 +138,9 @@ impl MessageFixture {
             router_socket_path.display()
         ));
         command.current_dir(self.directory.path());
+        if let Some(spawn_envelope_path) = spawn_envelope_path {
+            command.env("PERSONA_SPAWN_ENVELOPE", spawn_envelope_path);
+        }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         command.spawn().expect("message daemon shell starts")
     }
@@ -213,6 +261,33 @@ fn message_frame_codec_rejects_mismatched_signal_verb() {
         }
         other => panic!("expected typed signal request rejection, got {other:?}"),
     }
+}
+
+#[test]
+fn message_origin_stamper_uses_spawn_envelope_owner_identity() {
+    let fixture = MessageFixture::new();
+    let envelope_path =
+        fixture.write_spawn_envelope(OwnerIdentity::UnixUser(UnixUserId::new(7000)));
+    let stamper = MessageOriginStamper::from_spawn_envelope_path(envelope_path)
+        .expect("stamper reads spawn envelope");
+    let request = MessageRequest::MessageSubmission(signal_persona_message::MessageSubmission {
+        recipient: MessageRecipient::new("router"),
+        kind: MessageKind::Send,
+        body: MessageBody::new("origin-check"),
+    });
+
+    let decision = stamper
+        .stamp_request(request, PeerCredentials::from_user_id(UnixUserId::new(7001)))
+        .expect("message request stamps");
+
+    let ForwardDecision::Forward(MessageRequest::StampedMessageSubmission(stamped)) = decision
+    else {
+        panic!("expected stamped forward decision");
+    };
+    assert_eq!(
+        stamped.origin,
+        MessageOrigin::External(ConnectionClass::NonOwnerUser(UnixUserId::new(7001)))
+    );
 }
 
 #[test]
@@ -387,10 +462,14 @@ fn persona_message_daemon_forwards_cli_signal_frame_to_router_socket() {
     let start_path = fixture.start_path();
     let fake_router =
         FakeRouter::bind(&router_socket_path, start_path.clone()).serve(RouterReply::accepted(11));
-    let mut daemon = fixture.spawn_daemon_after_router_start(
+    let spawn_envelope_path = fixture.write_spawn_envelope(OwnerIdentity::UnixUser(
+        UnixUserId::new(unsafe { libc::geteuid() }),
+    ));
+    let mut daemon = fixture.spawn_daemon_after_router_start_with_spawn_envelope(
         &start_path,
         &message_socket_path,
         &router_socket_path,
+        Some(&spawn_envelope_path),
     );
 
     for _ in 0..100 {
@@ -420,6 +499,7 @@ fn persona_message_daemon_forwards_cli_signal_frame_to_router_socket() {
     assert_eq!(submission.recipient.as_str(), "designer");
     assert_eq!(submission.kind, MessageKind::Send);
     assert_eq!(submission.body.as_str(), "daemon-forward");
+    assert_eq!(stamped.origin, MessageOrigin::External(ConnectionClass::Owner));
     assert!(stamped.stamped_at.into_u64() > 0);
     assert!(text.contains("(SubmissionAccepted 11)"));
     assert!(!fixture.local_ledger_path().exists());
