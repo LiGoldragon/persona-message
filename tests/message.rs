@@ -7,17 +7,17 @@ use persona_message::supervision::{
     SupervisionFrameCodec, SupervisionListener, SupervisionProfile, SupervisionSocketMode,
 };
 use signal_core::{
-    ExchangeIdentifier, ExchangeLane, ExchangeSequence, FrameBody, NonEmpty, Operation, Request,
-    RequestPayload, RequestRejectionReason, SessionEpoch, SignalVerb,
+    ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty, Operation, Request, RequestPayload,
+    RequestRejectionReason, SessionEpoch, SignalVerb,
 };
 use signal_persona::{
     ComponentHealth, ComponentHealthQuery, ComponentHello, ComponentKind, ComponentName,
-    ComponentReadinessQuery, SupervisionFrame, SupervisionProtocolVersion, SupervisionReply,
-    SupervisionRequest,
+    ComponentReadinessQuery, SupervisionFrame, SupervisionFrameBody, SupervisionProtocolVersion,
+    SupervisionReply, SupervisionRequest,
 };
 use signal_persona_message::{
-    Frame, InboxEntry, InboxListing, MessageBody, MessageKind, MessageReply, MessageRequest,
-    MessageSender, MessageSlot, SubmissionAcceptance,
+    Frame, FrameBody as MessageFrameBody, InboxEntry, InboxListing, MessageBody, MessageKind,
+    MessageReply, MessageRequest, MessageSender, MessageSlot, SubmissionAcceptance,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -147,7 +147,7 @@ impl FakeRouter {
             let (mut stream, _) = self.listener.accept().expect("router accepts");
             let codec = SignalRouterFrameCodec::default();
             let frame = codec.read_frame(&mut stream).expect("router input reads");
-            let FrameBody::Request { exchange, request } = frame.into_body() else {
+            let MessageFrameBody::Request { exchange, request } = frame.into_body() else {
                 panic!("expected signal request frame");
             };
             let checked = request.into_checked().expect("router input checks");
@@ -196,7 +196,7 @@ fn message_frame_codec_rejects_mismatched_signal_verb() {
             recipient: signal_persona_message::MessageRecipient::new("operator"),
         }),
     )));
-    let frame = Frame::new(FrameBody::Request {
+    let frame = Frame::new(MessageFrameBody::Request {
         exchange: test_exchange(),
         request,
     });
@@ -455,7 +455,7 @@ fn input_rejects_unknown_record_heads() {
 }
 
 fn send_supervision_request(stream: &mut UnixStream, request: SupervisionRequest) {
-    let frame = SupervisionFrame::new(FrameBody::Request {
+    let frame = SupervisionFrame::new(SupervisionFrameBody::Request {
         exchange: test_exchange(),
         request: Request::from_payload(request),
     });
@@ -473,6 +473,6 @@ fn test_exchange() -> ExchangeIdentifier {
     ExchangeIdentifier::new(
         SessionEpoch::new(0),
         ExchangeLane::Connector,
-        ExchangeSequence::first(),
+        LaneSequence::first(),
     )
 }

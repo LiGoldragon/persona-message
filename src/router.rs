@@ -3,10 +3,10 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
 use signal_core::{
-    ExchangeIdentifier, ExchangeLane, ExchangeSequence, FrameBody, NonEmpty, Reply as SignalReply,
-    Request, SessionEpoch, SignalVerb, SubReply,
+    ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty, Reply as SignalReply, Request,
+    SessionEpoch, SignalVerb, SubReply,
 };
-use signal_persona_message::{Frame, MessageReply, MessageRequest};
+use signal_persona_message::{Frame, FrameBody, MessageReply, MessageRequest};
 
 use crate::error::{Error, Result};
 
@@ -143,7 +143,7 @@ impl SignalRouterFrameCodec {
         ExchangeIdentifier::new(
             SessionEpoch::new(0),
             ExchangeLane::Connector,
-            ExchangeSequence::first(),
+            LaneSequence::first(),
         )
     }
 
