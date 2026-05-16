@@ -8,6 +8,9 @@ pub enum Error {
     #[error("nota: {0}")]
     Nota(#[from] nota_codec::Error),
 
+    #[error("configuration: {0}")]
+    Configuration(#[from] nota_config::Error),
+
     #[error("signal frame: {0}")]
     SignalFrame(#[from] signal_core::FrameError),
 

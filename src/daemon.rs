@@ -3,7 +3,7 @@ use std::io::BufReader;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kameo::actor::{Actor, ActorRef, Spawn};
@@ -13,8 +13,8 @@ use nota_codec::{Decoder, NotaDecode};
 use signal_persona::TimestampNanos;
 use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
 use signal_persona_message::{
-    MessageOperationKind, MessageReply, MessageRequest, MessageRequestUnimplemented,
-    MessageUnimplementedReason, StampedMessageSubmission,
+    MessageDaemonConfiguration, MessageOperationKind, MessageReply, MessageRequest,
+    MessageRequestUnimplemented, MessageUnimplementedReason, StampedMessageSubmission,
 };
 
 use crate::error::{Error, Result};
@@ -22,96 +22,59 @@ use crate::router::{
     ReceivedMessageRequest, SignalMessageSocket, SignalRouterClient, SignalRouterFrameCodec,
     SignalRouterSocket,
 };
-use crate::supervision::{SupervisionListener, SupervisionProfile};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageDaemonCommandLine {
-    arguments: Vec<OsString>,
-}
-
-impl MessageDaemonCommandLine {
-    pub fn from_env() -> Self {
-        Self::from_arguments(std::env::args_os().skip(1))
-    }
-
-    pub fn from_arguments<I, S>(arguments: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<OsString>,
-    {
-        Self {
-            arguments: arguments.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    pub fn daemon(&self) -> Result<MessageDaemon> {
-        self.reject_extra_arguments()?;
-        let message_socket = self.message_socket()?;
-        let router_socket = self.router_socket()?;
-        Ok(MessageDaemon::from_input(MessageDaemonInput {
-            message_socket,
-            router_socket,
-        }))
-    }
-
-    pub fn run(&self) -> Result<()> {
-        self.daemon()?.run()
-    }
-
-    fn message_socket(&self) -> Result<SignalMessageSocket> {
-        if let Some(argument) = self.arguments.first() {
-            return Ok(SignalMessageSocket::from_path(argument));
-        }
-        SignalMessageSocket::from_environment().ok_or(Error::SignalMessageSocketMissing)
-    }
-
-    fn router_socket(&self) -> Result<SignalRouterSocket> {
-        if let Some(argument) = self.arguments.get(1) {
-            return Ok(SignalRouterSocket::from_path(argument));
-        }
-        SignalRouterSocket::from_environment()
-            .or_else(SignalRouterSocket::from_peer_environment)
-            .ok_or(Error::SignalRouterSocketMissing)
-    }
-
-    fn reject_extra_arguments(&self) -> Result<()> {
-        if let Some(argument) = self.arguments.get(2) {
-            return Err(Error::UnexpectedArgument {
-                got: argument.to_string_lossy().to_string(),
-            });
-        }
-        Ok(())
-    }
-}
+use crate::supervision::{SupervisionListener, SupervisionProfile, SupervisionSocketMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageDaemon {
     message_socket: SignalMessageSocket,
+    message_socket_mode: SocketMode,
     router_socket: SignalRouterSocket,
-    socket_mode: Option<SocketMode>,
+    supervision_socket_path: PathBuf,
+    supervision_socket_mode: SupervisionSocketMode,
+    owner_identity: OwnerIdentity,
 }
 
 impl MessageDaemon {
-    pub fn from_input(input: MessageDaemonInput) -> Self {
+    /// Canonical constructor — every production launch reads typed
+    /// `MessageDaemonConfiguration` from argv via `nota-config` and
+    /// hands the record here.
+    pub fn from_configuration(configuration: MessageDaemonConfiguration) -> Self {
         Self {
-            message_socket: input.message_socket,
-            router_socket: input.router_socket,
-            socket_mode: SocketMode::from_environment(),
+            message_socket: SignalMessageSocket::from_path(configuration.message_socket_path.as_str()),
+            message_socket_mode: SocketMode::from_octal(configuration.message_socket_mode.into_u32()),
+            router_socket: SignalRouterSocket::from_path(configuration.router_socket_path.as_str()),
+            supervision_socket_path: PathBuf::from(configuration.supervision_socket_path.as_str()),
+            supervision_socket_mode: SupervisionSocketMode::from_octal(
+                configuration.supervision_socket_mode.into_u32(),
+            ),
+            owner_identity: configuration.owner_identity,
         }
     }
 
-    pub fn with_socket_mode(mut self, socket_mode: SocketMode) -> Self {
-        self.socket_mode = Some(socket_mode);
-        self
+    /// In-process constructor — every input field explicit. Tests
+    /// use this when they build the daemon directly without going
+    /// through a configuration file.
+    pub fn from_input(input: MessageDaemonInput) -> Self {
+        Self {
+            message_socket: input.message_socket,
+            message_socket_mode: input.message_socket_mode,
+            router_socket: input.router_socket,
+            supervision_socket_path: input.supervision_socket_path,
+            supervision_socket_mode: input.supervision_socket_mode,
+            owner_identity: input.owner_identity,
+        }
     }
 
     pub fn run(self) -> Result<()> {
         let listener = self.bind_listener()?;
-        let _supervision = SupervisionListener::from_environment(SupervisionProfile::message())
-            .map(SupervisionListener::spawn)
-            .transpose()?;
+        let _supervision = SupervisionListener::new(
+            SupervisionProfile::message(),
+            self.supervision_socket_path.clone(),
+            self.supervision_socket_mode,
+        )
+        .spawn()?;
         let runtime = tokio::runtime::Runtime::new()?;
-        let stamper = MessageOriginStamper::from_environment()?;
+        let stamper = MessageOriginStamper::from_owner_identity(self.owner_identity.clone());
         let root = runtime.block_on(MessageDaemonRoot::start_root(MessageDaemonRootInput {
             router_socket: self.router_socket,
             stamper,
@@ -133,12 +96,10 @@ impl MessageDaemon {
         }
         let _ = std::fs::remove_file(self.message_socket.path());
         let listener = UnixListener::bind(self.message_socket.path())?;
-        if let Some(socket_mode) = self.socket_mode {
-            std::fs::set_permissions(
-                self.message_socket.path(),
-                std::fs::Permissions::from_mode(socket_mode.as_octal()),
-            )?;
-        }
+        std::fs::set_permissions(
+            self.message_socket.path(),
+            std::fs::Permissions::from_mode(self.message_socket_mode.as_octal()),
+        )?;
         Ok(listener)
     }
 
@@ -176,13 +137,6 @@ impl SocketMode {
         Self(value)
     }
 
-    pub fn from_environment() -> Option<Self> {
-        std::env::var("PERSONA_SOCKET_MODE")
-            .ok()
-            .and_then(|value| u32::from_str_radix(value.as_str(), 8).ok())
-            .map(Self::from_octal)
-    }
-
     pub const fn as_octal(self) -> u32 {
         self.0
     }
@@ -191,7 +145,11 @@ impl SocketMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageDaemonInput {
     pub message_socket: SignalMessageSocket,
+    pub message_socket_mode: SocketMode,
     pub router_socket: SignalRouterSocket,
+    pub supervision_socket_path: PathBuf,
+    pub supervision_socket_mode: SupervisionSocketMode,
+    pub owner_identity: OwnerIdentity,
 }
 
 pub struct MessageDaemonConnection {
@@ -343,19 +301,6 @@ pub struct MessageOriginStamper {
 }
 
 impl MessageOriginStamper {
-    pub fn for_current_user() -> Self {
-        Self::from_owner_identity(OwnerIdentity::UnixUser(UnixUserId::new(unsafe {
-            libc::geteuid()
-        })))
-    }
-
-    pub fn from_environment() -> Result<Self> {
-        if let Some(path) = std::env::var_os("PERSONA_SPAWN_ENVELOPE") {
-            return Self::from_spawn_envelope_path(path);
-        }
-        Ok(Self::for_current_user())
-    }
-
     pub fn from_spawn_envelope_path(path: impl AsRef<Path>) -> Result<Self> {
         let text = std::fs::read_to_string(path)?;
         let mut decoder = Decoder::new(&text);
@@ -420,3 +365,9 @@ pub enum ForwardDecision {
     Forward(MessageRequest),
     Reply(MessageReply),
 }
+
+#[doc(hidden)]
+// Kept to silence unused-import lint until the OsString-based command-line
+// fixture is reintroduced in tests/util.
+#[allow(dead_code)]
+fn _osstring_marker(_: OsString) {}

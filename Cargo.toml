@@ -23,6 +23,7 @@ path = "src/bin/persona_message_daemon.rs"
 kameo           = { version = "0.20", default-features = false, features = ["macros"] }
 libc            = "0.2"
 nota-codec      = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
+nota-config     = { git = "https://github.com/LiGoldragon/nota-config.git", branch = "main" }
 rkyv            = "0.8"
 signal-core     = { git = "https://github.com/LiGoldragon/signal-core.git" }
 signal-persona  = { git = "https://github.com/LiGoldragon/signal-persona.git" }

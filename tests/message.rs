@@ -66,6 +66,36 @@ impl MessageFixture {
         self.directory.path().join("message.envelope")
     }
 
+    fn configuration_path(&self) -> PathBuf {
+        self.directory.path().join("message-daemon.nota")
+    }
+
+    /// Write a typed `MessageDaemonConfiguration` NOTA file for the
+    /// daemon to read via `nota_config::ConfigurationSource`.
+    fn write_message_daemon_configuration(&self, owner_identity: OwnerIdentity) -> PathBuf {
+        let path = self.configuration_path();
+        let configuration = signal_persona_message::MessageDaemonConfiguration {
+            message_socket_path: signal_persona::WirePath::new(
+                self.message_socket_path().display().to_string(),
+            ),
+            message_socket_mode: signal_persona::SocketMode::new(0o660),
+            supervision_socket_path: signal_persona::WirePath::new(
+                self.supervision_socket_path().display().to_string(),
+            ),
+            supervision_socket_mode: signal_persona::SocketMode::new(0o600),
+            router_socket_path: signal_persona::WirePath::new(
+                self.router_socket_path().display().to_string(),
+            ),
+            owner_identity,
+        };
+        let mut encoder = Encoder::new();
+        configuration
+            .encode(&mut encoder)
+            .expect("configuration encodes");
+        std::fs::write(&path, encoder.into_string()).expect("configuration writes");
+        path
+    }
+
     fn write_spawn_envelope(&self, owner_identity: OwnerIdentity) -> PathBuf {
         let path = self.spawn_envelope_path();
         let envelope = signal_persona::SpawnEnvelope {
@@ -122,25 +152,19 @@ impl MessageFixture {
         command.spawn().expect("message shell starts")
     }
 
-    fn spawn_daemon_after_router_start_with_spawn_envelope(
+    fn spawn_daemon_after_router_start_with_configuration(
         &self,
         start_path: &Path,
-        message_socket_path: &Path,
-        router_socket_path: &Path,
-        spawn_envelope_path: Option<&Path>,
+        configuration_path: &Path,
     ) -> std::process::Child {
         let mut command = Command::new("sh");
         command.arg("-c").arg(format!(
-            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '{}' '{}'",
+            "while [ ! -f '{}' ]; do sleep 0.05; done; '{}' '{}'",
             start_path.display(),
             env!("CARGO_BIN_EXE_persona-message-daemon"),
-            message_socket_path.display(),
-            router_socket_path.display()
+            configuration_path.display(),
         ));
         command.current_dir(self.directory.path());
-        if let Some(spawn_envelope_path) = spawn_envelope_path {
-            command.env("PERSONA_SPAWN_ENVELOPE", spawn_envelope_path);
-        }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         command.spawn().expect("message daemon shell starts")
     }
@@ -214,15 +238,19 @@ impl FakeRouter {
 }
 
 #[test]
-fn message_daemon_applies_spawn_envelope_socket_mode() {
+fn message_daemon_applies_configured_socket_mode() {
     let fixture = MessageFixture::new();
     let message_socket_path = fixture.message_socket_path();
     let router_socket_path = fixture.router_socket_path();
+    let supervision_socket_path = fixture.supervision_socket_path();
     let daemon = MessageDaemon::from_input(MessageDaemonInput {
         message_socket: SignalMessageSocket::from_path(message_socket_path.clone()),
+        message_socket_mode: SocketMode::from_octal(0o660),
         router_socket: SignalRouterSocket::from_path(router_socket_path),
-    })
-    .with_socket_mode(SocketMode::from_octal(0o660));
+        supervision_socket_path,
+        supervision_socket_mode: SupervisionSocketMode::from_octal(0o600),
+        owner_identity: OwnerIdentity::UnixUser(UnixUserId::new(unsafe { libc::geteuid() })),
+    });
 
     let _listener = daemon
         .bind_listener()
@@ -462,14 +490,13 @@ fn persona_message_daemon_forwards_cli_signal_frame_to_router_socket() {
     let start_path = fixture.start_path();
     let fake_router =
         FakeRouter::bind(&router_socket_path, start_path.clone()).serve(RouterReply::accepted(11));
-    let spawn_envelope_path = fixture.write_spawn_envelope(OwnerIdentity::UnixUser(
-        UnixUserId::new(unsafe { libc::geteuid() }),
-    ));
-    let mut daemon = fixture.spawn_daemon_after_router_start_with_spawn_envelope(
+    let configuration_path = fixture.write_message_daemon_configuration(
+        OwnerIdentity::UnixUser(UnixUserId::new(unsafe { libc::geteuid() })),
+    );
+    let _ = (&message_socket_path, &router_socket_path);
+    let mut daemon = fixture.spawn_daemon_after_router_start_with_configuration(
         &start_path,
-        &message_socket_path,
-        &router_socket_path,
-        Some(&spawn_envelope_path),
+        &configuration_path,
     );
 
     for _ in 0..100 {
