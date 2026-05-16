@@ -2,13 +2,12 @@ use std::io::BufReader;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::{Infallible, SendError};
 use kameo::message::{Context, Message};
-use nota_codec::{Decoder, NotaDecode};
 use signal_persona::TimestampNanos;
 use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
 use signal_persona_message::{
@@ -73,10 +72,9 @@ impl MessageDaemon {
         )
         .spawn()?;
         let runtime = tokio::runtime::Runtime::new()?;
-        let stamper = MessageOriginStamper::from_owner_identity(self.owner_identity.clone());
         let root = runtime.block_on(MessageDaemonRoot::start_root(MessageDaemonRootInput {
             router_socket: self.router_socket,
-            stamper,
+            owner_identity: self.owner_identity,
         }));
         eprintln!(
             "persona-message-daemon socket={}",
@@ -191,7 +189,7 @@ impl MessageDaemonConnection {
 #[derive(Debug)]
 pub struct MessageDaemonRoot {
     router: SignalRouterClient,
-    stamper: MessageOriginStamper,
+    owner_identity: OwnerIdentity,
     forwarded_count: u64,
 }
 
@@ -199,7 +197,7 @@ impl MessageDaemonRoot {
     pub fn new(input: MessageDaemonRootInput) -> Self {
         Self {
             router: input.router_socket.client(),
-            stamper: input.stamper,
+            owner_identity: input.owner_identity,
             forwarded_count: 0,
         }
     }
@@ -208,12 +206,37 @@ impl MessageDaemonRoot {
         Self::spawn(Self::new(input))
     }
 
+    pub fn stamp_request(
+        &self,
+        request: MessageRequest,
+        peer: PeerCredentials,
+    ) -> Result<ForwardDecision> {
+        match request {
+            MessageRequest::MessageSubmission(submission) => Ok(ForwardDecision::Forward(
+                MessageRequest::StampedMessageSubmission(StampedMessageSubmission {
+                    submission,
+                    origin: self.origin_for_peer(peer),
+                    stamped_at: Self::timestamp_now()?,
+                }),
+            )),
+            MessageRequest::StampedMessageSubmission(_) => Ok(ForwardDecision::Reply(
+                MessageReply::MessageRequestUnimplemented(MessageRequestUnimplemented {
+                    operation: MessageOperationKind::StampedMessageSubmission,
+                    reason: MessageUnimplementedReason::NotInPrototypeScope,
+                }),
+            )),
+            MessageRequest::InboxQuery(query) => {
+                Ok(ForwardDecision::Forward(MessageRequest::InboxQuery(query)))
+            }
+        }
+    }
+
     fn forward(
         &mut self,
         request: MessageRequest,
         peer: PeerCredentials,
     ) -> Result<MessageReply> {
-        match self.stamper.stamp_request(request, peer)? {
+        match self.stamp_request(request, peer)? {
             ForwardDecision::Forward(request) => {
                 let reply = self.router.submit(request)?;
                 self.forwarded_count = self.forwarded_count.saturating_add(1);
@@ -222,12 +245,29 @@ impl MessageDaemonRoot {
             ForwardDecision::Reply(reply) => Ok(reply),
         }
     }
+
+    fn origin_for_peer(&self, peer: PeerCredentials) -> MessageOrigin {
+        match &self.owner_identity {
+            OwnerIdentity::UnixUser(user_id) if peer.user_id == *user_id => {
+                MessageOrigin::External(ConnectionClass::Owner)
+            }
+            _ => MessageOrigin::External(ConnectionClass::NonOwnerUser(peer.user_id)),
+        }
+    }
+
+    fn timestamp_now() -> Result<TimestampNanos> {
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| Error::ClockBeforeUnixEpoch)?;
+        let nanos = duration.as_nanos().min(u128::from(u64::MAX)) as u64;
+        Ok(TimestampNanos::new(nanos))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageDaemonRootInput {
     pub router_socket: SignalRouterSocket,
-    pub stamper: MessageOriginStamper,
+    pub owner_identity: OwnerIdentity,
 }
 
 impl Actor for MessageDaemonRoot {
@@ -291,72 +331,6 @@ impl PeerCredentials {
         Ok(Self {
             user_id: UnixUserId::new(credentials.uid),
         })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageOriginStamper {
-    engine_owner_identity: OwnerIdentity,
-}
-
-impl MessageOriginStamper {
-    pub fn from_spawn_envelope_path(path: impl AsRef<Path>) -> Result<Self> {
-        let text = std::fs::read_to_string(path)?;
-        let mut decoder = Decoder::new(&text);
-        let envelope = signal_persona::SpawnEnvelope::decode(&mut decoder)?;
-        Ok(Self::from_spawn_envelope(envelope))
-    }
-
-    pub fn from_spawn_envelope(envelope: signal_persona::SpawnEnvelope) -> Self {
-        Self::from_owner_identity(envelope.owner_identity)
-    }
-
-    pub fn from_owner_identity(engine_owner_identity: OwnerIdentity) -> Self {
-        Self {
-            engine_owner_identity,
-        }
-    }
-
-    pub fn stamp_request(
-        &self,
-        request: MessageRequest,
-        peer: PeerCredentials,
-    ) -> Result<ForwardDecision> {
-        match request {
-            MessageRequest::MessageSubmission(submission) => Ok(ForwardDecision::Forward(
-                MessageRequest::StampedMessageSubmission(StampedMessageSubmission {
-                    submission,
-                    origin: self.origin_for_peer(peer),
-                    stamped_at: Self::timestamp_now()?,
-                }),
-            )),
-            MessageRequest::StampedMessageSubmission(_) => Ok(ForwardDecision::Reply(
-                MessageReply::MessageRequestUnimplemented(MessageRequestUnimplemented {
-                    operation: MessageOperationKind::StampedMessageSubmission,
-                    reason: MessageUnimplementedReason::NotInPrototypeScope,
-                }),
-            )),
-            MessageRequest::InboxQuery(query) => {
-                Ok(ForwardDecision::Forward(MessageRequest::InboxQuery(query)))
-            }
-        }
-    }
-
-    fn origin_for_peer(&self, peer: PeerCredentials) -> MessageOrigin {
-        match &self.engine_owner_identity {
-            OwnerIdentity::UnixUser(user_id) if peer.user_id == *user_id => {
-                MessageOrigin::External(ConnectionClass::Owner)
-            }
-            _ => MessageOrigin::External(ConnectionClass::NonOwnerUser(peer.user_id)),
-        }
-    }
-
-    fn timestamp_now() -> Result<TimestampNanos> {
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| Error::ClockBeforeUnixEpoch)?;
-        let nanos = duration.as_nanos().min(u128::from(u64::MAX)) as u64;
-        Ok(TimestampNanos::new(nanos))
     }
 }
 

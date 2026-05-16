@@ -135,8 +135,8 @@
             context.cargoTest "message_daemon_answers_component_supervision_relation";
           message-frame-codec-rejects-mismatched-signal-verb =
             context.cargoTest "message_frame_codec_rejects_mismatched_signal_verb";
-          message-origin-stamper-uses-spawn-envelope-owner-identity =
-            context.cargoTest "message_origin_stamper_uses_spawn_envelope_owner_identity";
+          message-daemon-root-stamps-owner-identity-from-configuration =
+            context.cargoTest "message_daemon_root_stamps_owner_identity_from_configuration";
           persona-message-daemon-forwards-cli-signal-frame-to-router-socket =
             context.cargoTest "persona_message_daemon_forwards_cli_signal_frame_to_router_socket";
         }

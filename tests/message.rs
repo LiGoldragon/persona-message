@@ -1,8 +1,8 @@
 use nota_codec::{Encoder, Error, NotaEncode};
 use persona_message::command::{CommandLine, Input};
 use persona_message::daemon::{
-    ForwardDecision, MessageDaemon, MessageDaemonInput, MessageOriginStamper, PeerCredentials,
-    SocketMode,
+    ForwardDecision, MessageDaemon, MessageDaemonInput, MessageDaemonRoot, MessageDaemonRootInput,
+    PeerCredentials, SocketMode,
 };
 use persona_message::router::SignalRouterFrameCodec;
 use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
@@ -62,10 +62,6 @@ impl MessageFixture {
             .join(["messages", ".nota.log"].concat())
     }
 
-    fn spawn_envelope_path(&self) -> PathBuf {
-        self.directory.path().join("message.envelope")
-    }
-
     fn configuration_path(&self) -> PathBuf {
         self.directory.path().join("message-daemon.nota")
     }
@@ -93,41 +89,6 @@ impl MessageFixture {
             .encode(&mut encoder)
             .expect("configuration encodes");
         std::fs::write(&path, encoder.into_string()).expect("configuration writes");
-        path
-    }
-
-    fn write_spawn_envelope(&self, owner_identity: OwnerIdentity) -> PathBuf {
-        let path = self.spawn_envelope_path();
-        let envelope = signal_persona::SpawnEnvelope {
-            engine_id: signal_persona_auth::EngineId::new("test"),
-            component_kind: signal_persona::ComponentKind::Message,
-            component_name: signal_persona_auth::ComponentName::Message,
-            owner_identity,
-            state_dir: signal_persona::WirePath::new(self.directory.path().display().to_string()),
-            domain_socket_path: signal_persona::WirePath::new(
-                self.message_socket_path().display().to_string(),
-            ),
-            domain_socket_mode: signal_persona::SocketMode::new(0o660),
-            supervision_socket_path: signal_persona::WirePath::new(
-                self.supervision_socket_path().display().to_string(),
-            ),
-            supervision_socket_mode: signal_persona::SocketMode::new(0o600),
-            peer_sockets: vec![signal_persona::PeerSocket {
-                component_name: signal_persona_auth::ComponentName::Router,
-                domain_socket_path: signal_persona::WirePath::new(
-                    self.router_socket_path().display().to_string(),
-                ),
-            }],
-            manager_socket: signal_persona::WirePath::new(
-                self.directory.path().join("persona.sock").display().to_string(),
-            ),
-            supervision_protocol_version: signal_persona::SupervisionProtocolVersion::new(1),
-        };
-        let mut encoder = Encoder::new();
-        envelope
-            .encode(&mut encoder)
-            .expect("spawn envelope encodes");
-        std::fs::write(&path, encoder.into_string()).expect("spawn envelope writes");
         path
     }
 
@@ -292,19 +253,18 @@ fn message_frame_codec_rejects_mismatched_signal_verb() {
 }
 
 #[test]
-fn message_origin_stamper_uses_spawn_envelope_owner_identity() {
-    let fixture = MessageFixture::new();
-    let envelope_path =
-        fixture.write_spawn_envelope(OwnerIdentity::UnixUser(UnixUserId::new(7000)));
-    let stamper = MessageOriginStamper::from_spawn_envelope_path(envelope_path)
-        .expect("stamper reads spawn envelope");
+fn message_daemon_root_stamps_owner_identity_from_configuration() {
+    let root = MessageDaemonRoot::new(MessageDaemonRootInput {
+        router_socket: SignalRouterSocket::from_path(PathBuf::from("/tmp/unused-router.sock")),
+        owner_identity: OwnerIdentity::UnixUser(UnixUserId::new(7000)),
+    });
     let request = MessageRequest::MessageSubmission(signal_persona_message::MessageSubmission {
         recipient: MessageRecipient::new("router"),
         kind: MessageKind::Send,
         body: MessageBody::new("origin-check"),
     });
 
-    let decision = stamper
+    let decision = root
         .stamp_request(request, PeerCredentials::from_user_id(UnixUserId::new(7001)))
         .expect("message request stamps");
 

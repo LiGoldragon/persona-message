@@ -15,13 +15,13 @@ component.*
 - The `persona-message` daemon (binary file:
   `persona-message-daemon`) — a small Kameo daemon supervised
   by `persona-daemon` as the engine's message ingress
-  component. Binds `message.sock` at mode 0660 with the
-  engine-owner group by applying the `PERSONA_SOCKET_MODE` value
-  from the Persona spawn envelope; reads the typed
-  `PERSONA_SPAWN_ENVELOPE` when present; stamps `MessageSubmission`
-  frames with spawn-envelope owner identity, SO_PEERCRED-derived
-  origin, and ingress time; forwards `StampedMessageSubmission` frames to `persona-router`'s
-  internal socket (`router.sock`, 0600).
+  component. Reads a typed `MessageDaemonConfiguration` record
+  passed by argv via `nota-config`; binds `message.sock` at the
+  configured mode (0660 with the engine-owner group in
+  production) and stamps `MessageSubmission` frames with the
+  configured owner identity, SO_PEERCRED-derived origin, and
+  ingress time; forwards `StampedMessageSubmission` frames to
+  `persona-router`'s internal socket (`router.sock`, 0600).
 
 There is no `MessageProxy` component here. The supervised
 first-stack component is named `persona-message`; the long-lived
@@ -84,27 +84,28 @@ requests — no redb, no durable message ledger.
 The CLI surface (`message` binary) connects to `message.sock` like any other
 client. The daemon converts client-side `MessageSubmission` into
 router-side `StampedMessageSubmission` by attaching typed provenance from the
-typed spawn envelope, kernel peer credentials, and a daemon-minted ingress
-timestamp. It does not encode provenance as strings and it does not infer
-engine ownership from its own effective uid when the spawn envelope is
-available.
+typed `MessageDaemonConfiguration`'s `owner_identity`, kernel peer
+credentials, and a daemon-minted ingress timestamp. It does not encode
+provenance as strings and it does not infer engine ownership from its own
+effective uid; the owner identity is supplied by the persona manager via the
+typed configuration record.
 
 ## 2 · State and Ownership
 
 The message component owns no durable message state. The CLI requires
 `PERSONA_MESSAGE_SOCKET` or `PERSONA_SOCKET_PATH` and exits if the message
-daemon socket is absent. The daemon requires `PERSONA_MESSAGE_ROUTER_SOCKET`
-or a `router` peer socket in the spawn envelope and exits if the router socket
-is absent.
+daemon socket is absent. The daemon requires a typed `MessageDaemonConfiguration`
+on argv whose `router_socket_path` names the router's internal socket; it
+exits at decode time if the configuration is missing or malformed.
 
 Caller identity is not accepted from the model or CLI payload.
 `MessageSubmission` and `InboxQuery` stay sender-free, and the component sends
 no in-band proof material. The daemon stamps message submissions from the
-spawn-envelope `OwnerIdentity` plus SO_PEERCRED and forwards typed provenance
-in `StampedMessageSubmission`. Legacy direct launches without
-`PERSONA_SPAWN_ENVELOPE` fall back to the daemon's current Unix user only so
-old tests and manual debugging continue to run; managed engine launches use
-the spawn envelope.
+configured `OwnerIdentity` plus SO_PEERCRED and forwards typed provenance in
+`StampedMessageSubmission`. The persona manager builds the configuration
+record from the engine's spawn envelope and writes it to a NOTA file on
+spawn; the daemon never reads environment variables for control-plane
+settings.
 
 Actor registration, actor listing, pending delivery, retry, delivery results,
 and message ledger state are router or engine-manager concerns, not message
@@ -141,11 +142,13 @@ This repo does not own:
 - Supported input variants are `Send` and `Inbox`.
 - The message daemon socket is mandatory for the CLI.
 - The router socket is mandatory for the daemon.
-- The daemon applies the managed spawn-envelope socket mode to
-  `message.sock` before accepting client traffic.
-- Managed daemon launches read the typed spawn envelope before accepting
-  message ingress, and `External(Owner)` is derived from the envelope owner
-  identity rather than `persona-message-daemon`'s own uid.
+- The daemon applies the configured socket mode from
+  `MessageDaemonConfiguration` to `message.sock` before accepting client
+  traffic.
+- The daemon reads its typed `MessageDaemonConfiguration` from argv before
+  accepting message ingress, and `External(Owner)` is derived from the
+  configured `owner_identity` rather than `persona-message-daemon`'s own
+  uid.
 - CLI and daemon outbound traffic are length-prefixed rkyv Signal frames.
 - Request/reply matching is frame-level: every request frame carries an
   `ExchangeIdentifier`, and every reply frame echoes the same identifier.
@@ -182,7 +185,7 @@ tests/                         ingress and architectural-truth tests
 | The message daemon socket is mandatory for the CLI. | `nix flake check .#message-cli-requires-message-socket` |
 | The daemon applies the configured socket mode. | `nix flake check .#message-daemon-applies-configured-socket-mode` |
 | The daemon stamps and forwards CLI Signal frames to the router socket. | `nix flake check .#persona-message-daemon-forwards-cli-signal-frame-to-router-socket` |
-| The daemon derives owner ingress from the spawn envelope, not CLI payload. | `cargo test --test message message_origin_stamper_uses_spawn_envelope_owner_identity -- --exact` |
+| The daemon root stamps owner identity from the typed configuration, not the CLI payload. | `cargo test --test message message_daemon_root_stamps_owner_identity_from_configuration -- --exact` |
 | Mismatched Signal verb/payload pairs are rejected by typed Signal reason. | `nix flake check .#message-frame-codec-rejects-mismatched-signal-verb` |
 | The component does not construct in-band proof material. | `nix flake check .#message-component-cannot-own-local-ledger` |
 | Retired terminal-brand vocabulary cannot return. | `nix flake check .#message-runtime-cannot-reference-retired-terminal-brand` |
