@@ -20,7 +20,7 @@ name = "persona-message-daemon"
 path = "src/bin/persona_message_daemon.rs"
 
 [dependencies]
-kameo           = { version = "0.20", default-features = false, features = ["macros"] }
+kameo           = { git = "https://github.com/LiGoldragon/kameo", branch = "persona-lifecycle-terminal-outcome", default-features = false, features = ["macros"] }
 libc            = "0.2"
 nota-codec      = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
 nota-config     = { git = "https://github.com/LiGoldragon/nota-config.git", branch = "main" }

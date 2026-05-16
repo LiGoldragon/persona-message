@@ -15,19 +15,22 @@ use signal_core::{
 };
 use signal_persona::{
     ComponentHealth, ComponentHealthQuery, ComponentHello, ComponentKind, ComponentName,
-    ComponentReadinessQuery, SupervisionFrame, SupervisionFrameBody, SupervisionProtocolVersion,
-    SupervisionReply, SupervisionRequest,
+    ComponentReadinessQuery, GracefulStopRequest, SupervisionFrame, SupervisionFrameBody,
+    SupervisionProtocolVersion, SupervisionReply, SupervisionRequest,
 };
+use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
 use signal_persona_message::{
     Frame, FrameBody as MessageFrameBody, InboxEntry, InboxListing, MessageBody, MessageKind,
     MessageRecipient, MessageReply, MessageRequest, MessageSender, MessageSlot,
     SubmissionAcceptance,
 };
-use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::time::Duration;
+
+use kameo::actor::{ActorStateAbsence, ActorTerminalReason};
 
 struct MessageFixture {
     directory: tempfile::TempDir,
@@ -265,7 +268,10 @@ fn message_daemon_root_stamps_owner_identity_from_configuration() {
     });
 
     let decision = root
-        .stamp_request(request, PeerCredentials::from_user_id(UnixUserId::new(7001)))
+        .stamp_request(
+            request,
+            PeerCredentials::from_user_id(UnixUserId::new(7001)),
+        )
         .expect("message request stamps");
 
     let ForwardDecision::Forward(MessageRequest::StampedMessageSubmission(stamped)) = decision
@@ -276,6 +282,23 @@ fn message_daemon_root_stamps_owner_identity_from_configuration() {
         stamped.origin,
         MessageOrigin::External(ConnectionClass::NonOwnerUser(UnixUserId::new(7001)))
     );
+}
+
+#[test]
+fn message_daemon_root_shutdown_returns_terminal_outcome() {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime starts");
+    let root = runtime.block_on(MessageDaemonRoot::start_root(MessageDaemonRootInput {
+        router_socket: SignalRouterSocket::from_path(PathBuf::from("/tmp/unused-router.sock")),
+        owner_identity: OwnerIdentity::UnixUser(UnixUserId::new(7000)),
+    }));
+
+    let outcome = runtime
+        .block_on(MessageDaemonRoot::stop_root(root))
+        .expect("message daemon root stops");
+
+    assert_eq!(outcome.state, ActorStateAbsence::Dropped);
+    assert_eq!(outcome.reason, ActorTerminalReason::Stopped);
+    MessageDaemonRoot::assert_stopped_outcome(outcome).expect("terminal outcome is clean");
 }
 
 #[test]
@@ -338,6 +361,64 @@ fn message_daemon_answers_component_supervision_relation() {
         SupervisionReply::ComponentHealthReport(report)
             if report.health == ComponentHealth::Running
     ));
+}
+
+#[test]
+fn persona_message_daemon_graceful_stop_releases_message_socket_and_rejects_ingress() {
+    let fixture = MessageFixture::new();
+    let message_socket_path = fixture.message_socket_path();
+    let router_socket_path = fixture.router_socket_path();
+    let supervision_socket_path = fixture.supervision_socket_path();
+    let start_path = fixture.start_path();
+    let _router_listener = UnixListener::bind(&router_socket_path).expect("router socket binds");
+    let configuration_path = fixture.write_message_daemon_configuration(OwnerIdentity::UnixUser(
+        UnixUserId::new(unsafe { libc::geteuid() }),
+    ));
+    let daemon = fixture
+        .spawn_daemon_after_router_start_with_configuration(&start_path, &configuration_path);
+    std::fs::write(&start_path, "").expect("start marker writes");
+    wait_for_path(&message_socket_path, "message socket");
+    wait_for_path(&supervision_socket_path, "supervision socket");
+
+    {
+        let mut supervision =
+            UnixStream::connect(&supervision_socket_path).expect("supervision client connects");
+        let codec = SupervisionFrameCodec::new(1024 * 1024);
+        send_supervision_request(
+            &mut supervision,
+            SupervisionRequest::GracefulStopRequest(GracefulStopRequest {
+                component: ComponentName::new("persona-message"),
+            }),
+        );
+        assert!(matches!(
+            codec
+                .read_reply(&mut supervision)
+                .expect("graceful stop acknowledgement reads"),
+            SupervisionReply::GracefulStopAcknowledgement(_)
+        ));
+    }
+
+    let daemon_output = wait_for_child_output(daemon, "message daemon exits after graceful stop");
+    assert!(
+        daemon_output.status.success(),
+        "message daemon should exit cleanly after graceful stop: stderr={}",
+        String::from_utf8_lossy(&daemon_output.stderr)
+    );
+    assert!(
+        !message_socket_path.exists(),
+        "message socket path is removed after daemon shutdown"
+    );
+
+    let shell = fixture.spawn_message_after_start(
+        &start_path,
+        Some(&message_socket_path),
+        "(Send designer after-stop)",
+    );
+    let output = shell.wait_with_output().expect("message shell exits");
+    assert!(
+        !output.status.success(),
+        "message CLI ingress after daemon stop should fail"
+    );
 }
 
 #[test]
@@ -450,14 +531,12 @@ fn persona_message_daemon_forwards_cli_signal_frame_to_router_socket() {
     let start_path = fixture.start_path();
     let fake_router =
         FakeRouter::bind(&router_socket_path, start_path.clone()).serve(RouterReply::accepted(11));
-    let configuration_path = fixture.write_message_daemon_configuration(
-        OwnerIdentity::UnixUser(UnixUserId::new(unsafe { libc::geteuid() })),
-    );
+    let configuration_path = fixture.write_message_daemon_configuration(OwnerIdentity::UnixUser(
+        UnixUserId::new(unsafe { libc::geteuid() }),
+    ));
     let _ = (&message_socket_path, &router_socket_path);
-    let mut daemon = fixture.spawn_daemon_after_router_start_with_configuration(
-        &start_path,
-        &configuration_path,
-    );
+    let mut daemon = fixture
+        .spawn_daemon_after_router_start_with_configuration(&start_path, &configuration_path);
 
     for _ in 0..100 {
         if message_socket_path.exists() {
@@ -486,7 +565,10 @@ fn persona_message_daemon_forwards_cli_signal_frame_to_router_socket() {
     assert_eq!(submission.recipient.as_str(), "designer");
     assert_eq!(submission.kind, MessageKind::Send);
     assert_eq!(submission.body.as_str(), "daemon-forward");
-    assert_eq!(stamped.origin, MessageOrigin::External(ConnectionClass::Owner));
+    assert_eq!(
+        stamped.origin,
+        MessageOrigin::External(ConnectionClass::Owner)
+    );
     assert!(stamped.stamped_at.into_u64() > 0);
     assert!(text.contains("(SubmissionAccepted 11)"));
     assert!(!fixture.local_ledger_path().exists());
@@ -534,6 +616,32 @@ fn send_supervision_request(stream: &mut UnixStream, request: SupervisionRequest
             .as_slice(),
     )
     .expect("supervision request writes");
+}
+
+fn wait_for_path(path: &Path, label: &str) {
+    for _ in 0..100 {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("{label} did not appear at {}", path.display());
+}
+
+fn wait_for_child_output(mut child: Child, label: &str) -> Output {
+    for _ in 0..100 {
+        if child.try_wait().expect("child status checks").is_some() {
+            return child.wait_with_output().expect(label);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = child.kill();
+    let output = child.wait_with_output().expect(label);
+    panic!(
+        "{label} timed out: status={:?} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn test_exchange() -> ExchangeIdentifier {

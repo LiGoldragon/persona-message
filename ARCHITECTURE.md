@@ -88,7 +88,9 @@ typed `MessageDaemonConfiguration`'s `owner_identity`, kernel peer
 credentials, and a daemon-minted ingress timestamp. It does not encode
 provenance as strings and it does not infer engine ownership from its own
 effective uid; the owner identity is supplied by the persona manager via the
-typed configuration record.
+typed configuration record. The `geteuid()`-based stamper constructor
+(`MessageOriginStamper::for_current_user`) is a test-only and standalone-launch
+affordance, never reached on the supervised production path.
 
 ## 2 · State and Ownership
 
@@ -106,6 +108,14 @@ configured `OwnerIdentity` plus SO_PEERCRED and forwards typed provenance in
 record from the engine's spawn envelope and writes it to a NOTA file on
 spawn; the daemon never reads environment variables for control-plane
 settings.
+
+Typed-configuration-via-argv is the destination shape: every control-plane
+setting (socket paths, socket modes, owner identity, supervision socket,
+router socket) arrives as a typed `MessageDaemonConfiguration` field decoded
+by `nota-config::ConfigurationSource::from_argv`. The residual
+`from_environment` constructors on `SignalRouterSocket`, `SupervisionListener`,
+and the peer-socket enumeration helpers are transitional dead code, unreached
+on the production path and retiring on the next refactor.
 
 Actor registration, actor listing, pending delivery, retry, delivery results,
 and message ledger state are router or engine-manager concerns, not message
@@ -162,6 +172,15 @@ This repo does not own:
   SO_PEERCRED and never accepts it from the CLI payload.
 - The component does not write local message or pending logs.
 - The daemon root is a data-bearing Kameo actor.
+- The component depends on the stable Persona Kameo lifecycle reference, not
+  crates.io Kameo and not a raw revision pin.
+- A graceful supervision stop exits the daemon, stops `MessageDaemonRoot` with
+  a clean terminal outcome, releases the `message.sock` binding, and rejects
+  later CLI ingress.
+- The production daemon reads no environment variables for control-plane
+  configuration. Test fixtures may opt in via an explicit named env var, per
+  the `nota-config` test-shim discipline. Witness: a source scan forbids
+  env-var reads in the daemon binary and daemon runtime sources.
 
 ## Code Map
 
@@ -180,16 +199,20 @@ tests/                         ingress and architectural-truth tests
 
 | Constraint | Test |
 |---|---|
-| The router Signal path cannot create a local message ledger. | `nix flake check .#message-cli-sends-router-signal-without-local-ledger` |
-| Inbox reads come from the router, not a local ledger. | `nix flake check .#message-cli-inbox-uses-router-signal-not-local-ledger` |
-| The message daemon socket is mandatory for the CLI. | `nix flake check .#message-cli-requires-message-socket` |
-| The daemon applies the configured socket mode. | `nix flake check .#message-daemon-applies-configured-socket-mode` |
-| The daemon stamps and forwards CLI Signal frames to the router socket. | `nix flake check .#persona-message-daemon-forwards-cli-signal-frame-to-router-socket` |
-| The daemon root stamps owner identity from the typed configuration, not the CLI payload. | `cargo test --test message message_daemon_root_stamps_owner_identity_from_configuration -- --exact` |
-| Mismatched Signal verb/payload pairs are rejected by typed Signal reason. | `nix flake check .#message-frame-codec-rejects-mismatched-signal-verb` |
-| The component does not construct in-band proof material. | `nix flake check .#message-component-cannot-own-local-ledger` |
-| Retired terminal-brand vocabulary cannot return. | `nix flake check .#message-runtime-cannot-reference-retired-terminal-brand` |
-| Local ledger and endpoint surfaces cannot return. | `nix flake check .#message-component-cannot-own-local-ledger` |
+| The router Signal path cannot create a local message ledger. | `nix build .#checks.x86_64-linux.message-cli-sends-router-signal-without-local-ledger` |
+| Inbox reads come from the router, not a local ledger. | `nix build .#checks.x86_64-linux.message-cli-inbox-uses-router-signal-not-local-ledger` |
+| The message daemon socket is mandatory for the CLI. | `nix build .#checks.x86_64-linux.message-cli-requires-message-socket` |
+| The daemon applies the configured socket mode. | `nix build .#checks.x86_64-linux.message-daemon-applies-configured-socket-mode` |
+| The daemon stamps and forwards CLI Signal frames to the router socket. | `nix build .#checks.x86_64-linux.persona-message-daemon-forwards-cli-signal-frame-to-router-socket` |
+| The daemon root stamps owner identity from the typed configuration, not the CLI payload. | `nix build .#checks.x86_64-linux.message-daemon-root-stamps-owner-identity-from-configuration` |
+| The component uses the stable Persona Kameo lifecycle reference. | `nix build .#checks.x86_64-linux.message-component-uses-stable-kameo-lifecycle-reference` |
+| The daemon root shutdown returns a terminal outcome. | `nix build .#checks.x86_64-linux.message-daemon-root-shutdown-returns-terminal-outcome` |
+| Graceful daemon stop releases `message.sock` and rejects later ingress. | `nix build .#checks.x86_64-linux.persona-message-daemon-graceful-stop-releases-message-socket-and-rejects-ingress` |
+| The production daemon reads no environment variables for control-plane configuration. | `nix build .#checks.x86_64-linux.persona-message-daemon-reads-no-control-plane-environment-variables` |
+| Mismatched Signal verb/payload pairs are rejected by typed Signal reason. | `nix build .#checks.x86_64-linux.message-frame-codec-rejects-mismatched-signal-verb` |
+| The component does not construct in-band proof material. | `nix build .#checks.x86_64-linux.message-component-cannot-own-local-ledger` |
+| Retired terminal-brand vocabulary cannot return. | `nix build .#checks.x86_64-linux.message-runtime-cannot-reference-retired-terminal-brand` |
+| Local ledger and endpoint surfaces cannot return. | `nix build .#checks.x86_64-linux.message-component-cannot-own-local-ledger` |
 
 ## See Also
 

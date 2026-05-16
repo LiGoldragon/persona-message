@@ -2,7 +2,10 @@ use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use kameo::actor::{Actor, ActorRef, Spawn};
 use kameo::error::Infallible;
@@ -45,11 +48,12 @@ impl SupervisionSocketMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SupervisionListener {
     profile: SupervisionProfile,
     socket: PathBuf,
     mode: SupervisionSocketMode,
+    stop_signal: SupervisionStopSignal,
 }
 
 impl SupervisionListener {
@@ -62,7 +66,13 @@ impl SupervisionListener {
             profile,
             socket: socket.into(),
             mode,
+            stop_signal: SupervisionStopSignal::default(),
         }
+    }
+
+    pub fn with_stop_signal(mut self, stop_signal: SupervisionStopSignal) -> Self {
+        self.stop_signal = stop_signal;
+        self
     }
 
     pub fn spawn(self) -> std::io::Result<SupervisionHandle> {
@@ -71,14 +81,30 @@ impl SupervisionListener {
         }
         let _ = std::fs::remove_file(&self.socket);
         let listener = UnixListener::bind(&self.socket)?;
+        listener.set_nonblocking(true)?;
         std::fs::set_permissions(
             &self.socket,
             std::fs::Permissions::from_mode(self.mode.as_octal()),
         )?;
-        let server = SupervisionServer::new(self.profile, listener);
+        let server = SupervisionServer::new(self.profile, listener, self.stop_signal);
         Ok(SupervisionHandle {
             _thread: std::thread::spawn(move || server.run()),
         })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SupervisionStopSignal {
+    requested: Arc<AtomicBool>,
+}
+
+impl SupervisionStopSignal {
+    pub fn request_stop(&self) {
+        self.requested.store(true, Ordering::Release);
+    }
+
+    pub fn is_stop_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
     }
 }
 
@@ -89,19 +115,24 @@ pub struct SupervisionHandle {
 #[derive(Debug)]
 pub struct SupervisionPhase {
     profile: SupervisionProfile,
+    stop_signal: SupervisionStopSignal,
     request_count: u64,
 }
 
 impl SupervisionPhase {
-    fn new(profile: SupervisionProfile) -> Self {
+    fn new(profile: SupervisionProfile, stop_signal: SupervisionStopSignal) -> Self {
         Self {
             profile,
+            stop_signal,
             request_count: 0,
         }
     }
 
-    async fn start(profile: SupervisionProfile) -> ActorRef<Self> {
-        let reference = Self::spawn(Self::new(profile));
+    async fn start(
+        profile: SupervisionProfile,
+        stop_signal: SupervisionStopSignal,
+    ) -> ActorRef<Self> {
+        let reference = Self::spawn(Self::new(profile, stop_signal));
         reference.wait_for_startup().await;
         reference
     }
@@ -128,6 +159,7 @@ impl SupervisionPhase {
                 })
             }
             SupervisionRequest::GracefulStopRequest(_) => {
+                self.stop_signal.request_stop();
                 SupervisionReply::GracefulStopAcknowledgement(GracefulStopAcknowledgement {
                     drain_completed_at: None,
                 })
@@ -176,25 +208,39 @@ struct SupervisionServer {
     profile: SupervisionProfile,
     listener: UnixListener,
     codec: SupervisionFrameCodec,
+    stop_signal: SupervisionStopSignal,
 }
 
 impl SupervisionServer {
-    fn new(profile: SupervisionProfile, listener: UnixListener) -> Self {
+    fn new(
+        profile: SupervisionProfile,
+        listener: UnixListener,
+        stop_signal: SupervisionStopSignal,
+    ) -> Self {
         Self {
             profile,
             listener,
             codec: SupervisionFrameCodec::new(1024 * 1024),
+            stop_signal,
         }
     }
 
     fn run(self) {
         let runtime = tokio::runtime::Runtime::new().expect("supervision runtime starts");
-        let phase = runtime.block_on(SupervisionPhase::start(self.profile.clone()));
-        for incoming in self.listener.incoming() {
-            let Ok(mut stream) = incoming else {
-                continue;
-            };
-            let _ = self.serve_connection(&runtime, &phase, &mut stream);
+        let phase = runtime.block_on(SupervisionPhase::start(
+            self.profile.clone(),
+            self.stop_signal.clone(),
+        ));
+        while !self.stop_signal.is_stop_requested() {
+            match self.listener.accept() {
+                Ok((mut stream, _address)) => {
+                    let _ = self.serve_connection(&runtime, &phase, &mut stream);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => continue,
+            }
         }
     }
 
@@ -216,6 +262,9 @@ impl SupervisionServer {
                 .map_err(io_error)?;
             self.codec
                 .write_reply(stream, request.exchange, request.verb, reply.reply)?;
+            if self.stop_signal.is_stop_requested() {
+                break;
+            }
         }
         Ok(())
     }

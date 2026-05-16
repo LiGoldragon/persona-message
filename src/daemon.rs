@@ -3,9 +3,12 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use kameo::actor::{Actor, ActorRef, Spawn};
+use kameo::actor::{
+    Actor, ActorRef, ActorStateAbsence, ActorTerminalOutcome, ActorTerminalReason, Spawn,
+};
 use kameo::error::{Infallible, SendError};
 use kameo::message::{Context, Message};
 use signal_persona::TimestampNanos;
@@ -20,7 +23,9 @@ use crate::router::{
     ReceivedMessageRequest, SignalMessageSocket, SignalRouterClient, SignalRouterFrameCodec,
     SignalRouterSocket,
 };
-use crate::supervision::{SupervisionListener, SupervisionProfile, SupervisionSocketMode};
+use crate::supervision::{
+    SupervisionListener, SupervisionProfile, SupervisionSocketMode, SupervisionStopSignal,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageDaemon {
@@ -38,8 +43,12 @@ impl MessageDaemon {
     /// hands the record here.
     pub fn from_configuration(configuration: MessageDaemonConfiguration) -> Self {
         Self {
-            message_socket: SignalMessageSocket::from_path(configuration.message_socket_path.as_str()),
-            message_socket_mode: SocketMode::from_octal(configuration.message_socket_mode.into_u32()),
+            message_socket: SignalMessageSocket::from_path(
+                configuration.message_socket_path.as_str(),
+            ),
+            message_socket_mode: SocketMode::from_octal(
+                configuration.message_socket_mode.into_u32(),
+            ),
             router_socket: SignalRouterSocket::from_path(configuration.router_socket_path.as_str()),
             supervision_socket_path: PathBuf::from(configuration.supervision_socket_path.as_str()),
             supervision_socket_mode: SupervisionSocketMode::from_octal(
@@ -65,11 +74,14 @@ impl MessageDaemon {
 
     pub fn run(self) -> Result<()> {
         let listener = self.bind_listener()?;
+        listener.set_nonblocking(true)?;
+        let stop_signal = SupervisionStopSignal::default();
         let _supervision = SupervisionListener::new(
             SupervisionProfile::message(),
             self.supervision_socket_path.clone(),
             self.supervision_socket_mode,
         )
+        .with_stop_signal(stop_signal.clone())
         .spawn()?;
         let runtime = tokio::runtime::Runtime::new()?;
         let root = runtime.block_on(MessageDaemonRoot::start_root(MessageDaemonRootInput {
@@ -80,14 +92,21 @@ impl MessageDaemon {
             "persona-message-daemon socket={}",
             self.message_socket.path().display()
         );
-        for stream in listener.incoming() {
-            let stream = stream?;
-            Self::handle_connection(&runtime, &root, stream)?;
+        while !stop_signal.is_stop_requested() {
+            match listener.accept() {
+                Ok(stream) => Self::handle_connection(&runtime, &root, stream)?,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(error.into()),
+            }
         }
+        let outcome = runtime.block_on(MessageDaemonRoot::stop_root(root))?;
+        MessageDaemonRoot::assert_stopped_outcome(outcome)?;
         Ok(())
     }
 
-    pub fn bind_listener(&self) -> Result<UnixListener> {
+    pub fn bind_listener(&self) -> Result<MessageSocketBinding> {
         if let Some(parent) = self.message_socket.path().parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -97,7 +116,10 @@ impl MessageDaemon {
             self.message_socket.path(),
             std::fs::Permissions::from_mode(self.message_socket_mode.as_octal()),
         )?;
-        Ok(listener)
+        Ok(MessageSocketBinding::new(
+            self.message_socket.path().clone(),
+            listener,
+        ))
     }
 
     fn handle_connection(
@@ -123,6 +145,31 @@ impl MessageDaemon {
         };
         connection.write_reply(received, reply)?;
         Ok(())
+    }
+}
+
+pub struct MessageSocketBinding {
+    path: PathBuf,
+    listener: UnixListener,
+}
+
+impl MessageSocketBinding {
+    fn new(path: PathBuf, listener: UnixListener) -> Self {
+        Self { path, listener }
+    }
+
+    pub fn set_nonblocking(&self, nonblocking: bool) -> std::io::Result<()> {
+        self.listener.set_nonblocking(nonblocking)
+    }
+
+    pub fn accept(&self) -> std::io::Result<UnixStream> {
+        self.listener.accept().map(|(stream, _address)| stream)
+    }
+}
+
+impl Drop for MessageSocketBinding {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -206,6 +253,29 @@ impl MessageDaemonRoot {
         Self::spawn(Self::new(input))
     }
 
+    pub async fn stop_root(reference: ActorRef<Self>) -> Result<ActorTerminalOutcome> {
+        reference
+            .stop_gracefully()
+            .await
+            .map_err(|error| Error::Actor {
+                operation: "stop message daemon root",
+                detail: format!("{error:?}"),
+            })?;
+        Ok(reference.wait_for_shutdown().await)
+    }
+
+    pub fn assert_stopped_outcome(outcome: ActorTerminalOutcome) -> Result<()> {
+        if outcome.state != ActorStateAbsence::Dropped
+            || outcome.reason != ActorTerminalReason::Stopped
+        {
+            return Err(Error::Actor {
+                operation: "stop message daemon root",
+                detail: format!("{outcome:?}"),
+            });
+        }
+        Ok(())
+    }
+
     pub fn stamp_request(
         &self,
         request: MessageRequest,
@@ -231,11 +301,7 @@ impl MessageDaemonRoot {
         }
     }
 
-    fn forward(
-        &mut self,
-        request: MessageRequest,
-        peer: PeerCredentials,
-    ) -> Result<MessageReply> {
+    fn forward(&mut self, request: MessageRequest, peer: PeerCredentials) -> Result<MessageReply> {
         match self.stamp_request(request, peer)? {
             ForwardDecision::Forward(request) => {
                 let reply = self.router.submit(request)?;

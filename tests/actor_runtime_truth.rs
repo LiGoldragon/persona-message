@@ -96,6 +96,21 @@ fn message_daemon_uses_data_bearing_kameo_root_actor() {
 }
 
 #[test]
+fn message_component_uses_stable_kameo_lifecycle_reference() {
+    let cargo = SourceFile::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"));
+    let lockfile = SourceFile::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock"));
+
+    assert!(cargo.contains("branch = \"persona-lifecycle-terminal-outcome\""));
+    assert!(!cargo.contains("kameo           = { version = \"0.20\""));
+    assert!(
+        lockfile.contains(
+            "git+https://github.com/LiGoldragon/kameo?branch=persona-lifecycle-terminal-outcome#22514f7c6900"
+        ),
+        "Cargo.lock must witness the stable Persona Kameo lifecycle reference"
+    );
+}
+
+#[test]
 fn message_cli_uses_message_socket_not_router_socket() {
     let command = SourceFile::read(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

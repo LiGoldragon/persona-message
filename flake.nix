@@ -46,14 +46,15 @@
 
               touch "$out"
             '';
-          cargoTest =
-            testName: craneLib.cargoTest (
+          cargoTestFile =
+            testFile: testName: craneLib.cargoTest (
               commonArgs
               // {
                 inherit cargoArtifacts;
-                cargoTestExtraArgs = "--test message ${testName} -- --exact";
+                cargoTestExtraArgs = "--test ${testFile} ${testName} -- --exact";
               }
             );
+          cargoTest = cargoTestFile "message";
           context = {
             inherit
               pkgs
@@ -62,6 +63,7 @@
               commonArgs
               cargoArtifacts
               sourceConstraintCheck
+              cargoTestFile
               cargoTest
               ;
           };
@@ -123,6 +125,10 @@
             context.sourceConstraintCheck "message-runtime-cannot-reference-retired-terminal-brand" ./scripts/message-runtime-cannot-reference-retired-terminal-brand;
           message-component-cannot-own-local-ledger =
             context.sourceConstraintCheck "message-component-cannot-own-local-ledger" ./scripts/message-component-cannot-own-local-ledger;
+          persona-message-daemon-reads-no-control-plane-environment-variables =
+            context.sourceConstraintCheck "persona-message-daemon-reads-no-control-plane-environment-variables" ./scripts/persona-message-daemon-reads-no-control-plane-environment-variables;
+          message-component-uses-stable-kameo-lifecycle-reference =
+            context.cargoTestFile "actor_runtime_truth" "message_component_uses_stable_kameo_lifecycle_reference";
           message-cli-sends-router-signal-without-local-ledger =
             context.cargoTest "command_line_send_routes_signal_frame_without_writing_local_ledger";
           message-cli-inbox-uses-router-signal-not-local-ledger =
@@ -137,6 +143,10 @@
             context.cargoTest "message_frame_codec_rejects_mismatched_signal_verb";
           message-daemon-root-stamps-owner-identity-from-configuration =
             context.cargoTest "message_daemon_root_stamps_owner_identity_from_configuration";
+          message-daemon-root-shutdown-returns-terminal-outcome =
+            context.cargoTest "message_daemon_root_shutdown_returns_terminal_outcome";
+          persona-message-daemon-graceful-stop-releases-message-socket-and-rejects-ingress =
+            context.cargoTest "persona_message_daemon_graceful_stop_releases_message_socket_and_rejects_ingress";
           persona-message-daemon-forwards-cli-signal-frame-to-router-socket =
             context.cargoTest "persona_message_daemon_forwards_cli_signal_frame_to_router_socket";
         }
