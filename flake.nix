@@ -129,8 +129,8 @@
             context.cargoTest "command_line_inbox_routes_signal_frame_without_reading_local_ledger";
           message-cli-requires-message-socket =
             context.cargoTest "command_line_send_requires_message_socket";
-          message-daemon-applies-spawn-envelope-socket-mode =
-            context.cargoTest "message_daemon_applies_spawn_envelope_socket_mode";
+          message-daemon-applies-configured-socket-mode =
+            context.cargoTest "message_daemon_applies_configured_socket_mode";
           message-daemon-answers-component-supervision-relation =
             context.cargoTest "message_daemon_answers_component_supervision_relation";
           message-frame-codec-rejects-mismatched-signal-verb =

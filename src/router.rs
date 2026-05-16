@@ -16,14 +16,6 @@ pub struct SignalRouterSocket {
 }
 
 impl SignalRouterSocket {
-    pub fn from_environment() -> Option<Self> {
-        std::env::var_os("PERSONA_MESSAGE_ROUTER_SOCKET").map(Self::from_path)
-    }
-
-    pub fn from_peer_environment() -> Option<Self> {
-        PeerSocketEnvironment::from_environment().router_socket()
-    }
-
     pub fn from_path(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
@@ -269,46 +261,4 @@ pub struct ReceivedMessageRequest {
     pub exchange: ExchangeIdentifier,
     pub verb: SignalVerb,
     pub request: MessageRequest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PeerSocketEnvironment {
-    peers: Vec<PeerSocket>,
-}
-
-impl PeerSocketEnvironment {
-    pub fn from_environment() -> Self {
-        let count = std::env::var("PERSONA_PEER_SOCKET_COUNT")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        let peers = (0..count)
-            .filter_map(|index| PeerSocket::from_environment(index))
-            .collect();
-        Self { peers }
-    }
-
-    pub fn router_socket(&self) -> Option<SignalRouterSocket> {
-        self.peers
-            .iter()
-            .find(|peer| peer.component == "router")
-            .map(|peer| SignalRouterSocket::from_path(peer.socket_path.clone()))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PeerSocket {
-    component: String,
-    socket_path: PathBuf,
-}
-
-impl PeerSocket {
-    fn from_environment(index: usize) -> Option<Self> {
-        let component = std::env::var(format!("PERSONA_PEER_{index}_COMPONENT")).ok()?;
-        let socket_path = std::env::var_os(format!("PERSONA_PEER_{index}_SOCKET_PATH"))?;
-        Some(Self {
-            component,
-            socket_path: PathBuf::from(socket_path),
-        })
-    }
 }

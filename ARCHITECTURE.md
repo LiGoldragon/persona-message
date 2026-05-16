@@ -180,7 +180,7 @@ tests/                         ingress and architectural-truth tests
 | The router Signal path cannot create a local message ledger. | `nix flake check .#message-cli-sends-router-signal-without-local-ledger` |
 | Inbox reads come from the router, not a local ledger. | `nix flake check .#message-cli-inbox-uses-router-signal-not-local-ledger` |
 | The message daemon socket is mandatory for the CLI. | `nix flake check .#message-cli-requires-message-socket` |
-| The daemon applies the managed spawn-envelope socket mode. | `nix flake check .#message-daemon-applies-spawn-envelope-socket-mode` |
+| The daemon applies the configured socket mode. | `nix flake check .#message-daemon-applies-configured-socket-mode` |
 | The daemon stamps and forwards CLI Signal frames to the router socket. | `nix flake check .#persona-message-daemon-forwards-cli-signal-frame-to-router-socket` |
 | The daemon derives owner ingress from the spawn envelope, not CLI payload. | `cargo test --test message message_origin_stamper_uses_spawn_envelope_owner_identity -- --exact` |
 | Mismatched Signal verb/payload pairs are rejected by typed Signal reason. | `nix flake check .#message-frame-codec-rejects-mismatched-signal-verb` |

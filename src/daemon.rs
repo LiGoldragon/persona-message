@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::io::BufReader;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -365,9 +364,3 @@ pub enum ForwardDecision {
     Forward(MessageRequest),
     Reply(MessageReply),
 }
-
-#[doc(hidden)]
-// Kept to silence unused-import lint until the OsString-based command-line
-// fixture is reintroduced in tests/util.
-#[allow(dead_code)]
-fn _osstring_marker(_: OsString) {}
