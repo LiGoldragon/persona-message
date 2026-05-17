@@ -4,6 +4,7 @@ use persona_message::daemon::{
     ForwardDecision, MessageDaemon, MessageDaemonInput, MessageDaemonRoot, MessageDaemonRootInput,
     MessageIngressContext, PeerCredentials, SocketMode,
 };
+use persona_message::output_validator::OutputValidatorCommandLine;
 use persona_message::router::SignalRouterFrameCodec;
 use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
 use persona_message::supervision::{
@@ -564,6 +565,70 @@ fn command_line_inbox_routes_signal_frame_without_reading_local_ledger() {
     assert!(text.contains("RouterInboxListing"));
     assert!(text.contains("router-only"));
     assert!(!text.contains("stale-local"));
+}
+
+#[test]
+fn message_output_validator_decodes_submission_accepted_nota() {
+    let fixture = MessageFixture::new();
+    let output_path = fixture.directory.path().join("accepted.nota");
+    let output = persona_message::command::Output::from_router_reply(
+        MessageReply::SubmissionAccepted(SubmissionAcceptance {
+            message_slot: MessageSlot::new(19),
+        }),
+    )
+    .expect("reply projects to command output")
+    .to_nota()
+    .expect("command output encodes");
+    std::fs::write(&output_path, output).expect("output fixture writes");
+
+    OutputValidatorCommandLine::from_arguments([
+        "--file",
+        output_path.to_str().expect("path is utf8"),
+        "expect-submission-accepted",
+    ])
+    .run()
+    .expect("validator accepts typed submission output");
+}
+
+#[test]
+fn message_output_validator_decodes_router_inbox_listing_nota() {
+    let fixture = MessageFixture::new();
+    let output_path = fixture.directory.path().join("inbox.nota");
+    let output = persona_message::command::Output::from_router_reply(MessageReply::InboxListing(
+        InboxListing {
+            messages: vec![InboxEntry {
+                message_slot: MessageSlot::new(21),
+                sender: MessageSender::new("reviewer"),
+                body: MessageBody::new("reviewer completed task"),
+            }],
+        },
+    ))
+    .expect("reply projects to command output")
+    .to_nota()
+    .expect("command output encodes");
+    std::fs::write(&output_path, output).expect("output fixture writes");
+
+    OutputValidatorCommandLine::from_arguments([
+        "--file",
+        output_path.to_str().expect("path is utf8"),
+        "expect-inbox-entry",
+        "--sender",
+        "reviewer",
+        "--body",
+        "reviewer completed task",
+    ])
+    .run()
+    .expect("validator accepts typed inbox output");
+
+    OutputValidatorCommandLine::from_arguments([
+        "--file",
+        output_path.to_str().expect("path is utf8"),
+        "expect-inbox-body-absent",
+        "--body",
+        "message not present",
+    ])
+    .run()
+    .expect("validator accepts absent body expectation");
 }
 
 #[test]

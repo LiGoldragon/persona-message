@@ -135,6 +135,13 @@ pub enum Output {
 }
 
 impl Output {
+    pub fn from_nota(text: &str) -> Result<Self> {
+        let mut decoder = Decoder::new(text);
+        let output = Self::decode(&mut decoder)?;
+        expect_end(&mut decoder)?;
+        Ok(output)
+    }
+
     pub fn to_nota(&self) -> Result<String> {
         let mut encoder = Encoder::new();
         self.encode(&mut encoder)?;
@@ -176,6 +183,30 @@ impl NotaEncode for Output {
             Self::SubmissionRejected(output) => output.encode(encoder),
             Self::RouterInboxListing(output) => output.encode(encoder),
             Self::MessageRequestUnimplemented(output) => output.encode(encoder),
+        }
+    }
+}
+
+impl NotaDecode for Output {
+    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
+        let head = decoder.peek_record_head()?;
+        match head.as_str() {
+            "SubmissionAccepted" => Ok(Self::SubmissionAccepted(SubmissionAccepted::decode(
+                decoder,
+            )?)),
+            "SubmissionRejected" => Ok(Self::SubmissionRejected(SubmissionRejected::decode(
+                decoder,
+            )?)),
+            "RouterInboxListing" => Ok(Self::RouterInboxListing(RouterInboxListing::decode(
+                decoder,
+            )?)),
+            "MessageRequestUnimplemented" => Ok(Self::MessageRequestUnimplemented(
+                SignalMessageRequestUnimplemented::decode(decoder)?,
+            )),
+            other => Err(nota_codec::Error::UnknownKindForVerb {
+                verb: "Output",
+                got: other.to_string(),
+            }),
         }
     }
 }

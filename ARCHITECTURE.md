@@ -187,8 +187,10 @@ This repo does not own:
 ```text
 src/main.rs                    message CLI entry
 src/bin/persona_message_daemon.rs daemon entry
+src/bin/message_validate_output.rs test/debug validator for message CLI NOTA replies
 src/command.rs                 NOTA input/output projection
 src/daemon.rs                  daemon listener and data-bearing Kameo root
+src/output_validator.rs        structured validator for sandbox message artifacts
 src/router.rs                  Signal frame clients and codec
 src/surface.rs                 message-local NOTA surface records
 src/error.rs                   crate error enum

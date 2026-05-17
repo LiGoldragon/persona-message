@@ -23,6 +23,12 @@ pub enum Error {
     #[error("unexpected command-line argument: {got:?}")]
     UnexpectedArgument { got: String },
 
+    #[error("invalid validator argument: {detail}")]
+    InvalidValidatorArgument { detail: String },
+
+    #[error("message output validation failed: {detail}")]
+    OutputValidation { detail: String },
+
     #[error("message daemon socket is not configured; set PERSONA_MESSAGE_SOCKET")]
     SignalMessageSocketMissing,
 

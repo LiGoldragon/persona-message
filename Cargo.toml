@@ -19,6 +19,10 @@ path = "src/main.rs"
 name = "persona-message-daemon"
 path = "src/bin/persona_message_daemon.rs"
 
+[[bin]]
+name = "message-validate-output"
+path = "src/bin/message_validate_output.rs"
+
 [dependencies]
 kameo           = { git = "https://github.com/LiGoldragon/kameo", branch = "persona-lifecycle-terminal-outcome", default-features = false, features = ["macros"] }
 libc            = "0.2"
