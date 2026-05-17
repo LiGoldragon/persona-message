@@ -2,7 +2,7 @@ use nota_codec::{Encoder, Error, NotaEncode};
 use persona_message::command::{CommandLine, Input};
 use persona_message::daemon::{
     ForwardDecision, MessageDaemon, MessageDaemonInput, MessageDaemonRoot, MessageDaemonRootInput,
-    PeerCredentials, SocketMode,
+    MessageIngressContext, PeerCredentials, SocketMode,
 };
 use persona_message::router::SignalRouterFrameCodec;
 use persona_message::router::{SignalMessageSocket, SignalRouterSocket};
@@ -18,11 +18,14 @@ use signal_persona::{
     ComponentReadinessQuery, GracefulStopRequest, SupervisionFrame, SupervisionFrameBody,
     SupervisionProtocolVersion, SupervisionReply, SupervisionRequest,
 };
-use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
+use signal_persona_auth::{
+    ComponentInstanceName, ComponentName as ProvenanceComponentName, ConnectionClass,
+    InternalComponentInstanceOrigin, MessageOrigin, OwnerIdentity, UnixUserId,
+};
 use signal_persona_message::{
-    Frame, FrameBody as MessageFrameBody, InboxEntry, InboxListing, MessageBody, MessageKind,
-    MessageRecipient, MessageReply, MessageRequest, MessageSender, MessageSlot,
-    SubmissionAcceptance,
+    ComponentMessageIngress, Frame, FrameBody as MessageFrameBody, InboxEntry, InboxListing,
+    MessageBody, MessageKind, MessageRecipient, MessageReply, MessageRequest, MessageSender,
+    MessageSlot, SubmissionAcceptance,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -50,6 +53,13 @@ impl MessageFixture {
         self.directory.path().join("message.signal.sock")
     }
 
+    fn component_message_socket_path(&self, component_instance_name: &str) -> PathBuf {
+        self.directory
+            .path()
+            .join("message-ingress")
+            .join(format!("{component_instance_name}.sock"))
+    }
+
     fn supervision_socket_path(&self) -> PathBuf {
         self.directory.path().join("message.supervision.sock")
     }
@@ -72,6 +82,14 @@ impl MessageFixture {
     /// Write a typed `MessageDaemonConfiguration` NOTA file for the
     /// daemon to read via `nota_config::ConfigurationSource`.
     fn write_message_daemon_configuration(&self, owner_identity: OwnerIdentity) -> PathBuf {
+        self.write_message_daemon_configuration_with_ingresses(owner_identity, Vec::new())
+    }
+
+    fn write_message_daemon_configuration_with_ingresses(
+        &self,
+        owner_identity: OwnerIdentity,
+        component_ingresses: Vec<ComponentMessageIngress>,
+    ) -> PathBuf {
         let path = self.configuration_path();
         let configuration = signal_persona_message::MessageDaemonConfiguration {
             message_socket_path: signal_persona::WirePath::new(
@@ -85,6 +103,7 @@ impl MessageFixture {
             router_socket_path: signal_persona::WirePath::new(
                 self.router_socket_path().display().to_string(),
             ),
+            component_ingresses,
             owner_identity,
         };
         let mut encoder = Encoder::new();
@@ -213,6 +232,7 @@ fn message_daemon_applies_configured_socket_mode() {
         router_socket: SignalRouterSocket::from_path(router_socket_path),
         supervision_socket_path,
         supervision_socket_mode: SupervisionSocketMode::from_octal(0o600),
+        component_ingresses: Vec::new(),
         owner_identity: OwnerIdentity::UnixUser(UnixUserId::new(unsafe { libc::geteuid() })),
     });
 
@@ -270,7 +290,9 @@ fn message_daemon_root_stamps_owner_identity_from_configuration() {
     let decision = root
         .stamp_request(
             request,
-            PeerCredentials::from_user_id(UnixUserId::new(7001)),
+            MessageIngressContext::external_peer(PeerCredentials::from_user_id(UnixUserId::new(
+                7001,
+            ))),
         )
         .expect("message request stamps");
 
@@ -281,6 +303,42 @@ fn message_daemon_root_stamps_owner_identity_from_configuration() {
     assert_eq!(
         stamped.origin,
         MessageOrigin::External(ConnectionClass::NonOwnerUser(UnixUserId::new(7001)))
+    );
+}
+
+#[test]
+fn message_daemon_root_stamps_component_instance_origin_from_ingress() {
+    let root = MessageDaemonRoot::new(MessageDaemonRootInput {
+        router_socket: SignalRouterSocket::from_path(PathBuf::from("/tmp/unused-router.sock")),
+        owner_identity: OwnerIdentity::UnixUser(UnixUserId::new(7000)),
+    });
+    let origin = InternalComponentInstanceOrigin::new(
+        ProvenanceComponentName::Harness,
+        ComponentInstanceName::new("initiator"),
+    );
+    let request = MessageRequest::MessageSubmission(signal_persona_message::MessageSubmission {
+        recipient: MessageRecipient::new("responder"),
+        kind: MessageKind::Send,
+        body: MessageBody::new("component-origin-check"),
+    });
+
+    let decision = root
+        .stamp_request(
+            request,
+            MessageIngressContext::internal_component_instance(
+                origin.clone(),
+                PeerCredentials::from_user_id(UnixUserId::new(7000)),
+            ),
+        )
+        .expect("message request stamps");
+
+    let ForwardDecision::Forward(MessageRequest::StampedMessageSubmission(stamped)) = decision
+    else {
+        panic!("expected stamped forward decision");
+    };
+    assert_eq!(
+        stamped.origin,
+        MessageOrigin::InternalComponentInstance(origin)
     );
 }
 
@@ -572,6 +630,62 @@ fn persona_message_daemon_forwards_cli_signal_frame_to_router_socket() {
     assert!(stamped.stamped_at.into_u64() > 0);
     assert!(text.contains("(SubmissionAccepted 11)"));
     assert!(!fixture.local_ledger_path().exists());
+}
+
+#[test]
+fn persona_message_daemon_forwards_component_ingress_as_internal_component_instance() {
+    let fixture = MessageFixture::new();
+    let message_socket_path = fixture.component_message_socket_path("initiator");
+    let router_socket_path = fixture.router_socket_path();
+    let start_path = fixture.start_path();
+    let fake_router =
+        FakeRouter::bind(&router_socket_path, start_path.clone()).serve(RouterReply::accepted(12));
+    let origin = InternalComponentInstanceOrigin::new(
+        ProvenanceComponentName::Harness,
+        ComponentInstanceName::new("initiator"),
+    );
+    let configuration_path = fixture.write_message_daemon_configuration_with_ingresses(
+        OwnerIdentity::UnixUser(UnixUserId::new(unsafe { libc::geteuid() })),
+        vec![ComponentMessageIngress {
+            origin: origin.clone(),
+            socket_path: signal_persona::WirePath::new(message_socket_path.display().to_string()),
+            socket_mode: signal_persona::SocketMode::new(0o600),
+        }],
+    );
+    let mut daemon = fixture
+        .spawn_daemon_after_router_start_with_configuration(&start_path, &configuration_path);
+
+    for _ in 0..100 {
+        if message_socket_path.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        message_socket_path.exists(),
+        "daemon bound component ingress socket"
+    );
+    let shell = fixture.spawn_message_after_start(
+        &start_path,
+        Some(&message_socket_path),
+        "(Send responder from-initiator)",
+    );
+
+    let output = shell.wait_with_output().expect("message shell exits");
+    let recorded = fake_router.join().expect("router thread joins");
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+
+    assert!(output.status.success());
+    let MessageRequest::StampedMessageSubmission(stamped) = recorded.request else {
+        panic!("expected daemon-forwarded stamped message submission");
+    };
+    assert_eq!(stamped.submission.recipient.as_str(), "responder");
+    assert_eq!(stamped.submission.body.as_str(), "from-initiator");
+    assert_eq!(
+        stamped.origin,
+        MessageOrigin::InternalComponentInstance(origin)
+    );
 }
 
 #[test]

@@ -12,10 +12,13 @@ use kameo::actor::{
 use kameo::error::{Infallible, SendError};
 use kameo::message::{Context, Message};
 use signal_persona::TimestampNanos;
-use signal_persona_auth::{ConnectionClass, MessageOrigin, OwnerIdentity, UnixUserId};
+use signal_persona_auth::{
+    ConnectionClass, InternalComponentInstanceOrigin, MessageOrigin, OwnerIdentity, UnixUserId,
+};
 use signal_persona_message::{
-    MessageDaemonConfiguration, MessageOperationKind, MessageReply, MessageRequest,
-    MessageRequestUnimplemented, MessageUnimplementedReason, StampedMessageSubmission,
+    ComponentMessageIngress, MessageDaemonConfiguration, MessageOperationKind, MessageReply,
+    MessageRequest, MessageRequestUnimplemented, MessageUnimplementedReason,
+    StampedMessageSubmission,
 };
 
 use crate::error::{Error, Result};
@@ -34,6 +37,7 @@ pub struct MessageDaemon {
     router_socket: SignalRouterSocket,
     supervision_socket_path: PathBuf,
     supervision_socket_mode: SupervisionSocketMode,
+    component_ingresses: Vec<ComponentMessageIngressBinding>,
     owner_identity: OwnerIdentity,
 }
 
@@ -54,6 +58,11 @@ impl MessageDaemon {
             supervision_socket_mode: SupervisionSocketMode::from_octal(
                 configuration.supervision_socket_mode.into_u32(),
             ),
+            component_ingresses: configuration
+                .component_ingresses
+                .into_iter()
+                .map(ComponentMessageIngressBinding::from_contract)
+                .collect(),
             owner_identity: configuration.owner_identity,
         }
     }
@@ -68,13 +77,14 @@ impl MessageDaemon {
             router_socket: input.router_socket,
             supervision_socket_path: input.supervision_socket_path,
             supervision_socket_mode: input.supervision_socket_mode,
+            component_ingresses: input.component_ingresses,
             owner_identity: input.owner_identity,
         }
     }
 
     pub fn run(self) -> Result<()> {
-        let listener = self.bind_listener()?;
-        listener.set_nonblocking(true)?;
+        let mut listeners = self.bind_listeners()?;
+        listeners.set_nonblocking(true)?;
         let stop_signal = SupervisionStopSignal::default();
         let _supervision = SupervisionListener::new(
             SupervisionProfile::message(),
@@ -93,9 +103,9 @@ impl MessageDaemon {
             self.message_socket.path().display()
         );
         while !stop_signal.is_stop_requested() {
-            match listener.accept() {
-                Ok(stream) => Self::handle_connection(&runtime, &root, stream)?,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            match listeners.accept_one() {
+                Ok(Some(accepted)) => Self::handle_connection(&runtime, &root, accepted)?,
+                Ok(None) => {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(error) => return Err(error.into()),
@@ -107,32 +117,40 @@ impl MessageDaemon {
     }
 
     pub fn bind_listener(&self) -> Result<MessageSocketBinding> {
-        if let Some(parent) = self.message_socket.path().parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let _ = std::fs::remove_file(self.message_socket.path());
-        let listener = UnixListener::bind(self.message_socket.path())?;
-        std::fs::set_permissions(
-            self.message_socket.path(),
-            std::fs::Permissions::from_mode(self.message_socket_mode.as_octal()),
-        )?;
-        Ok(MessageSocketBinding::new(
+        MessageSocketBinder::new(
             self.message_socket.path().clone(),
-            listener,
-        ))
+            self.message_socket_mode,
+            MessageIngressAuthority::ExternalPeer,
+        )
+        .bind()
+    }
+
+    pub fn bind_listeners(&self) -> Result<MessageSocketBindings> {
+        let mut bindings = vec![self.bind_listener()?];
+        for ingress in &self.component_ingresses {
+            bindings.push(
+                MessageSocketBinder::new(
+                    ingress.socket.path().clone(),
+                    ingress.socket_mode,
+                    MessageIngressAuthority::InternalComponentInstance(ingress.origin.clone()),
+                )
+                .bind()?,
+            );
+        }
+        Ok(MessageSocketBindings::new(bindings))
     }
 
     fn handle_connection(
         runtime: &tokio::runtime::Runtime,
         root: &ActorRef<MessageDaemonRoot>,
-        stream: UnixStream,
+        accepted: AcceptedMessageConnection,
     ) -> Result<()> {
-        let mut connection = MessageDaemonConnection::from_stream(stream)?;
-        let peer = connection.peer_credentials();
+        let mut connection = MessageDaemonConnection::from_stream(accepted.stream)?;
+        let ingress = MessageIngressContext::new(accepted.authority, connection.peer_credentials());
         let received = connection.read_request()?;
         let request = received.request.clone();
         let reply = match runtime
-            .block_on(async { root.ask(ForwardMessageRequest { request, peer }).await })
+            .block_on(async { root.ask(ForwardMessageRequest { request, ingress }).await })
         {
             Ok(reply) => reply,
             Err(SendError::HandlerError(error)) => return Err(error),
@@ -148,22 +166,123 @@ impl MessageDaemon {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentMessageIngressBinding {
+    socket: SignalMessageSocket,
+    socket_mode: SocketMode,
+    origin: InternalComponentInstanceOrigin,
+}
+
+impl ComponentMessageIngressBinding {
+    pub fn new(
+        socket: SignalMessageSocket,
+        socket_mode: SocketMode,
+        origin: InternalComponentInstanceOrigin,
+    ) -> Self {
+        Self {
+            socket,
+            socket_mode,
+            origin,
+        }
+    }
+
+    pub fn from_contract(ingress: ComponentMessageIngress) -> Self {
+        Self::new(
+            SignalMessageSocket::from_path(ingress.socket_path.as_str()),
+            SocketMode::from_octal(ingress.socket_mode.into_u32()),
+            ingress.origin,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageSocketBinder {
+    path: PathBuf,
+    mode: SocketMode,
+    authority: MessageIngressAuthority,
+}
+
+impl MessageSocketBinder {
+    pub fn new(path: PathBuf, mode: SocketMode, authority: MessageIngressAuthority) -> Self {
+        Self {
+            path,
+            mode,
+            authority,
+        }
+    }
+
+    pub fn bind(self) -> Result<MessageSocketBinding> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let _ = std::fs::remove_file(&self.path);
+        let listener = UnixListener::bind(&self.path)?;
+        std::fs::set_permissions(
+            &self.path,
+            std::fs::Permissions::from_mode(self.mode.as_octal()),
+        )?;
+        Ok(MessageSocketBinding::new(
+            self.path,
+            listener,
+            self.authority,
+        ))
+    }
+}
+
 pub struct MessageSocketBinding {
     path: PathBuf,
     listener: UnixListener,
+    authority: MessageIngressAuthority,
 }
 
 impl MessageSocketBinding {
-    fn new(path: PathBuf, listener: UnixListener) -> Self {
-        Self { path, listener }
+    fn new(path: PathBuf, listener: UnixListener, authority: MessageIngressAuthority) -> Self {
+        Self {
+            path,
+            listener,
+            authority,
+        }
     }
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> std::io::Result<()> {
         self.listener.set_nonblocking(nonblocking)
     }
 
-    pub fn accept(&self) -> std::io::Result<UnixStream> {
-        self.listener.accept().map(|(stream, _address)| stream)
+    pub fn accept(&self) -> std::io::Result<AcceptedMessageConnection> {
+        self.listener
+            .accept()
+            .map(|(stream, _address)| AcceptedMessageConnection {
+                stream,
+                authority: self.authority.clone(),
+            })
+    }
+}
+
+pub struct MessageSocketBindings {
+    bindings: Vec<MessageSocketBinding>,
+}
+
+impl MessageSocketBindings {
+    pub fn new(bindings: Vec<MessageSocketBinding>) -> Self {
+        Self { bindings }
+    }
+
+    pub fn set_nonblocking(&self, nonblocking: bool) -> std::io::Result<()> {
+        for binding in &self.bindings {
+            binding.set_nonblocking(nonblocking)?;
+        }
+        Ok(())
+    }
+
+    pub fn accept_one(&mut self) -> std::io::Result<Option<AcceptedMessageConnection>> {
+        for binding in &self.bindings {
+            match binding.accept() {
+                Ok(accepted) => return Ok(Some(accepted)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -193,6 +312,7 @@ pub struct MessageDaemonInput {
     pub router_socket: SignalRouterSocket,
     pub supervision_socket_path: PathBuf,
     pub supervision_socket_mode: SupervisionSocketMode,
+    pub component_ingresses: Vec<ComponentMessageIngressBinding>,
     pub owner_identity: OwnerIdentity,
 }
 
@@ -279,13 +399,13 @@ impl MessageDaemonRoot {
     pub fn stamp_request(
         &self,
         request: MessageRequest,
-        peer: PeerCredentials,
+        ingress: MessageIngressContext,
     ) -> Result<ForwardDecision> {
         match request {
             MessageRequest::MessageSubmission(submission) => Ok(ForwardDecision::Forward(
                 MessageRequest::StampedMessageSubmission(StampedMessageSubmission {
                     submission,
-                    origin: self.origin_for_peer(peer),
+                    origin: ingress.origin(&self.owner_identity),
                     stamped_at: Self::timestamp_now()?,
                 }),
             )),
@@ -301,23 +421,18 @@ impl MessageDaemonRoot {
         }
     }
 
-    fn forward(&mut self, request: MessageRequest, peer: PeerCredentials) -> Result<MessageReply> {
-        match self.stamp_request(request, peer)? {
+    fn forward(
+        &mut self,
+        request: MessageRequest,
+        ingress: MessageIngressContext,
+    ) -> Result<MessageReply> {
+        match self.stamp_request(request, ingress)? {
             ForwardDecision::Forward(request) => {
                 let reply = self.router.submit(request)?;
                 self.forwarded_count = self.forwarded_count.saturating_add(1);
                 Ok(reply)
             }
             ForwardDecision::Reply(reply) => Ok(reply),
-        }
-    }
-
-    fn origin_for_peer(&self, peer: PeerCredentials) -> MessageOrigin {
-        match &self.owner_identity {
-            OwnerIdentity::UnixUser(user_id) if peer.user_id == *user_id => {
-                MessageOrigin::External(ConnectionClass::Owner)
-            }
-            _ => MessageOrigin::External(ConnectionClass::NonOwnerUser(peer.user_id)),
         }
     }
 
@@ -350,7 +465,7 @@ impl Actor for MessageDaemonRoot {
 
 pub struct ForwardMessageRequest {
     request: MessageRequest,
-    peer: PeerCredentials,
+    ingress: MessageIngressContext,
 }
 
 impl Message<ForwardMessageRequest> for MessageDaemonRoot {
@@ -361,7 +476,68 @@ impl Message<ForwardMessageRequest> for MessageDaemonRoot {
         message: ForwardMessageRequest,
         _context: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.forward(message.request, message.peer)
+        self.forward(message.request, message.ingress)
+    }
+}
+
+pub struct AcceptedMessageConnection {
+    stream: UnixStream,
+    authority: MessageIngressAuthority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageIngressContext {
+    authority: MessageIngressAuthority,
+    peer: PeerCredentials,
+}
+
+impl MessageIngressContext {
+    pub fn new(authority: MessageIngressAuthority, peer: PeerCredentials) -> Self {
+        Self { authority, peer }
+    }
+
+    pub fn external_peer(peer: PeerCredentials) -> Self {
+        Self::new(MessageIngressAuthority::ExternalPeer, peer)
+    }
+
+    pub fn internal_component_instance(
+        origin: InternalComponentInstanceOrigin,
+        peer: PeerCredentials,
+    ) -> Self {
+        Self::new(
+            MessageIngressAuthority::InternalComponentInstance(origin),
+            peer,
+        )
+    }
+
+    pub fn origin(&self, owner_identity: &OwnerIdentity) -> MessageOrigin {
+        self.authority.origin_for_peer(owner_identity, self.peer)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageIngressAuthority {
+    ExternalPeer,
+    InternalComponentInstance(InternalComponentInstanceOrigin),
+}
+
+impl MessageIngressAuthority {
+    pub fn origin_for_peer(
+        &self,
+        owner_identity: &OwnerIdentity,
+        peer: PeerCredentials,
+    ) -> MessageOrigin {
+        match self {
+            Self::ExternalPeer => match owner_identity {
+                OwnerIdentity::UnixUser(user_id) if peer.user_id == *user_id => {
+                    MessageOrigin::External(ConnectionClass::Owner)
+                }
+                _ => MessageOrigin::External(ConnectionClass::NonOwnerUser(peer.user_id)),
+            },
+            Self::InternalComponentInstance(origin) => {
+                MessageOrigin::InternalComponentInstance(origin.clone())
+            }
+        }
     }
 }
 
